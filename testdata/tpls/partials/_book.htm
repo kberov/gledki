@@ -1,0 +1,14 @@
+${wrapper partials/_box_wrapper}
+<h1>${book_title}</h1>
+<table>
+    <tr><th>Автор</th><td>${book_author}</td></tr>
+    <tr><th>ISBN</th><td>${book_isbn}</td></tr>
+    <tr><th>Издател:</th><td>${book_issuer}</td></tr>
+    <tr><th>Цена:</th><td>${book_price}</td></tr>
+</table>
+<h2>Други книги</h2>
+<ul>
+${other_books} 
+</ul>
+<!-- The file partials/footer.htm will be included here by Tmpls.Compile -->
+${include partials/footer}
