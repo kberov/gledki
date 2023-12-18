@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/labstack/gommon/log"
 	ft "github.com/valyala/fasttemplate"
 )
 
 var templates = "./testdata/tpls"
 var ext = ".htm"
+var logger *log.Logger
 
 // remove all compiled previously templates
 func init() {
@@ -26,11 +27,16 @@ func init() {
 		}
 		return err
 	})
+	logger = log.New("tmpls")
+	logger.SetOutput(os.Stderr)
+	logger.SetLevel(log.DEBUG)
+	logger.SetHeader(defaultLogHeader)
 }
 
 func TestNew(t *testing.T) {
 	// load templates
 	tpls, err := New(templates, ext, [2]string{"${", "}"}, true)
+	tpls.Logger = logger
 	if err != nil {
 		t.Fatal("Error New: ", err.Error())
 	} else {
@@ -42,16 +48,19 @@ func TestNew(t *testing.T) {
 	}
 	// do not load templates
 	tpls, err = New(templates, ext, [2]string{"${", "}"}, false)
+	tpls.Logger = logger
 	if err != nil {
 		t.Fatal("Eror New: ", err.Error())
 	}
 	if len(tpls.files) > 0 {
 		t.Fatal("templates should not be loaded")
 	}
-	// load nonreadable templates
+	//Try to load nonreadable templates
+	os.Chmod(templates+"/../tpls_bad/_noread.htm", 0300)
 	_, err = New(templates+"/../tpls_bad", ext, [2]string{"${", "}"}, true)
 	if err != nil {
 		t.Logf("Expected error from New: %s", err.Error())
+		os.Chmod(templates+"/../tpls_bad/_noread.htm", 0400)
 	} else {
 		t.Fatal("Reading nonreadable file should have failed!")
 	}
@@ -67,6 +76,7 @@ var data = DataMap{
 
 func TestExecute(t *testing.T) {
 	tpls, _ := New(templates, ext, [2]string{"${", "}"}, false)
+	tpls.Logger = logger
 	tpls.DataMap = data
 	var out strings.Builder
 	_, _ = tpls.Execute(&out, "view")
@@ -144,7 +154,7 @@ func TestAddExecuteFunc(t *testing.T) {
 	// Even later, when the whole page is put together
 	_, err := tpls.Execute(os.Stdout, "book")
 	if err != nil {
-		log.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
+		t.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
 	}
 }
 
@@ -172,9 +182,9 @@ func TestOtherPanics(t *testing.T) {
 	tpls.wg.Add(1)
 	expectPanic(t, func() { tpls.storeCompiled(path, tpls.compiled[path]) })
 	// abs. path
-	expectPanic(t, func() { findRoot(path) })
+	expectPanic(t, func() { tpls.findRoot(path) })
 	// rel. path
-	expectPanic(t, func() { findRoot("." + path) })
+	expectPanic(t, func() { tpls.findRoot("." + path) })
 }
 
 func TestIncludeLimitNoPanic(t *testing.T) {
@@ -196,7 +206,7 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 	var out strings.Builder
 	_, err := tpls.Execute(&out, "includes")
 	if err != nil {
-		log.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
+		t.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
 	}
 	outstr := out.String()
 	t.Log(outstr)

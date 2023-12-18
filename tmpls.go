@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,22 +28,27 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/labstack/gommon/log"
+
 	ft "github.com/valyala/fasttemplate"
 )
+
+// TagFunc is an alias for fasttemplate.TagFunc
+type TagFunc = ft.TagFunc
 
 var spf = fmt.Sprintf
 
 // path => slurped file content
 type filesMap map[string]string
 
-// A map for replacement into templates. Can have the same value types, needed
+// DataMap is a stash for replacement into templates. Can have the same value types, needed
 // for fasttemplate:
 //   - []byte - the fastest value type
 //   - string - convenient value type
 //   - TagFunc - flexible value type
 type DataMap map[string]any
 
-// Manager for files and data for fasttemplate.
+// Tmpls manages files and data for fasttemplate.
 type Tmpls struct {
 	// A map for replacement into templates
 	DataMap DataMap
@@ -63,16 +67,32 @@ type Tmpls struct {
 	IncludeLimit int
 	// To wait for storeCompiled() to finish.
 	wg sync.WaitGroup
+	// Any logger defining Debug, Error, Info, Warn
+	Logger Logger
 }
 
-// Instantiates a new [Tmpls] struct and returns it. Prepares [DataMap] and
+const defaultLogHeader = `${prefix}:${time_rfc3339}:${level}:${short_file}:${line}`
+
+// New instantiates a new [Tmpls] struct and returns it. Prepares [DataMap] and
 // loads all template files from disk under the given `root` if `loadFiles` is
 // true. Otherwise postpones the loading of the needed file until
 // [Tmpls.Compile] is invoked automatically in [Tmpls.Execute].
 func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error) {
-	root = findRoot(root)
-	t := &Tmpls{DataMap: make(DataMap, 5), compiled: make(filesMap, 5),
-		files: make(filesMap, 5), Ext: ext, root: root, Tags: tags, IncludeLimit: 3}
+	t := &Tmpls{
+		DataMap:      make(DataMap, 5),
+		compiled:     make(filesMap, 5),
+		files:        make(filesMap, 5),
+		Ext:          ext,
+		Tags:         tags,
+		IncludeLimit: 3,
+		Logger:       log.New("tmpls"),
+	}
+	if err := t.findRoot(root); err != nil {
+		return nil, err
+	}
+	t.Logger.SetOutput(os.Stderr)
+	t.Logger.SetLevel(log.WARN)
+	t.Logger.SetHeader(defaultLogHeader)
 	if loadFiles {
 		if err := t.loadFiles(); err != nil {
 			return nil, err
@@ -81,7 +101,7 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error
 	return t, nil
 }
 
-// Compiles a template and returns its content or an error. This means:
+// Compile composes a template and returns its content or an error. This means:
 //   - The file is loaded from disk using [Tmpls.LoadFile] for use by
 //     [Tmpls.Execute].
 //   - if the template contains `${wrapper some/file}`, the wrapper file is
@@ -107,6 +127,7 @@ func (t *Tmpls) Compile(path string) (string, error) {
 	if text, e := t.loadCompiled(path); e == nil {
 		return text, nil
 	}
+	t.Logger.Debugf("Compile('%s')", path)
 	text, err := t.LoadFile(path)
 	if err != nil {
 		return "", err
@@ -128,7 +149,7 @@ func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
 	if text, ok := t.compiled[fullPath]; ok {
 		return text, nil
 	}
-	println("in loadCompiled...")
+	t.Logger.Debugf("loadCompiled('%s')", fullPath)
 	fullPath = fullPath + "c"
 	if fileIsReadable(fullPath) {
 		if data, err := os.ReadFile(fullPath); err != nil {
@@ -143,14 +164,16 @@ func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
 
 func (t *Tmpls) storeCompiled(fullPath, text string) {
 	defer t.wg.Done()
-	println("in storeCompiled...")
+	t.Logger.Debugf("storeCompiled('%s')", fullPath)
 	err := os.WriteFile(fullPath+"c", []byte(text), 0600)
 	if err != nil {
-		panic(err)
+		t.Logger.Panic(err)
 	}
 }
 
-// Loads, compiles (if needed) and executes the passed template using
+var ftExec = ft.Execute
+
+// Execute compiles (if needed) and executes the passed template using
 // fasttemplate.Execute. The path is resolved by prefixing the root folder
 // and attaching the extension, passed to [New], if the passed file is only a
 // base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
@@ -159,15 +182,15 @@ func (t *Tmpls) Execute(w io.Writer, path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	length, err := ft.Execute(text, t.Tags[0], t.Tags[1], w, t.DataMap)
+	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.DataMap)
 	t.wg.Wait()
 	return length, err
 
 }
 
-// A wrapper for fasttemplate.ExecuteStd(). Useful for preparing partial
-// templates which will be later included in the main template, because it
-// keeps unknown placeholders untouched.
+// FtExecStd is a wrapper for fasttemplate.ExecuteStd(). Useful for preparing
+// partial templates which will be later included in the main template, because
+// it keeps unknown placeholders untouched.
 func (t *Tmpls) FtExecStd(tmpl string, w io.Writer, data map[string]any) (int64, error) {
 	return ft.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
 }
@@ -183,8 +206,9 @@ func (t *Tmpls) loadFiles() error {
 	})
 }
 
-// Loads a template from disk or from cache, if already loaded before.
-// Returns the template text or error if template cannot be loaded.
+// LoadFile is used to load a template from disk or from cache, if already
+// loaded before.  Returns the template text or error if template cannot be
+// loaded.
 func (t *Tmpls) LoadFile(path string) (string, error) {
 	path = t.toFullPath(path)
 	if text, ok := t.files[path]; ok && len(text) > 0 {
@@ -211,9 +235,9 @@ func (t *Tmpls) toFullPath(path string) string {
 	return path
 }
 
-// Merges additional entries into the data map, used by [fasttemplate Execute]
-// in [Tmpls.Execute]. If entries with the same key exist, they will be
-// overriden with the new values.
+// MergeDataMap adds entries into the data map, used by
+// fasttemplate.Execute(...) in [Tmpls.Execute]. If entries with the same key
+// exist, they will be overriden with the new values.
 func (t *Tmpls) MergeDataMap(data DataMap) {
 	for k, v := range data {
 		t.DataMap[k] = v
@@ -224,25 +248,28 @@ func (t *Tmpls) MergeDataMap(data DataMap) {
 // provided root is relative, the function expects the root to be relative to
 // the Executable file or to the current working directory. If the root does
 // not exist, this function panics.
-func findRoot(root string) string {
+func (t *Tmpls) findRoot(root string) error {
 	if !filepath.IsAbs(root) {
 		byExe := filepath.Join(findBinDir(), root)
 		if dirExists(byExe) {
-			return byExe
+			t.root = byExe
+			return nil
 		}
 		// Now try by CWD
 		byCwd, _ := filepath.Abs(root)
 		if dirExists(byCwd) {
-			return byCwd
+			t.root = byCwd
+			return nil
 		} else { // this is dead code but Go compiler made me write it
-			panic(spf("Templates root directory '%s' does not exist!", byCwd))
+			return fmt.Errorf("Tmplsroot directory '%s' does not exist!", byCwd)
 		}
 	}
 
 	if dirExists(root) {
-		return root
+		t.root = root
+		return nil
 	} else { // this is dead code but Go compiler made me write it
-		panic(spf("Templates root directory '%s' does not exist!", root))
+		return fmt.Errorf("Templates root directory '%s' does not exist!", root)
 	}
 }
 
@@ -296,7 +323,7 @@ func (t *Tmpls) include(text string) (string, error) {
 			}
 			includedFileContent, err := t.LoadFile(m[2])
 			if err != nil {
-				log.Printf("err:%s", err.Error())
+				t.Logger.Warnf("err:%s", err.Error())
 				return text, err
 			}
 			includedFileContent, err = t.wrap(strings.Trim(includedFileContent, "\n"))
@@ -352,5 +379,20 @@ func (t *Tmpls) detectInludeRecurionLimit() bool {
 	return (details != nil) && detailsme.Name() == details.Name()
 }
 
-//
-// [fasttemplate Execute]: https://github.com/valyala/fasttemplate
+// Logger is implemented by gommon/log
+type Logger interface {
+	Debug(args ...any)
+	Debugf(format string, args ...any)
+	DisableColor()
+	Error(args ...any)
+	Errorf(format string, args ...any)
+	Info(args ...any)
+	Infof(format string, args ...any)
+	Panic(i ...any)
+	Panicf(format string, args ...any)
+	SetHeader(h string)
+	SetLevel(v log.Lvl)
+	SetOutput(w io.Writer)
+	Warn(args ...any)
+	Warnf(format string, args ...any)
+}
