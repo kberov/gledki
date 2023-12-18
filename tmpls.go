@@ -16,7 +16,6 @@ examples.
 package tmpls
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -67,7 +66,7 @@ type Tmpls struct {
 	IncludeLimit int
 	// To wait for storeCompiled() to finish.
 	wg sync.WaitGroup
-	// Any logger defining Debug, Error, Info, Warn
+	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
 	Logger Logger
 }
 
@@ -152,12 +151,9 @@ func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
 	t.Logger.Debugf("loadCompiled('%s')", fullPath)
 	fullPath = fullPath + "c"
 	if fileIsReadable(fullPath) {
-		if data, err := os.ReadFile(fullPath); err != nil {
-			return "", err
-		} else {
-			t.compiled[fullPath] = string(data)
-			return t.compiled[fullPath], nil
-		}
+		data, _ := os.ReadFile(fullPath)
+		t.compiled[fullPath] = string(data)
+		return t.compiled[fullPath], nil
 	}
 	return "", errors.New(spf("File '%s' could not be read!", fullPath))
 }
@@ -193,6 +189,14 @@ func (t *Tmpls) Execute(w io.Writer, path string) (int64, error) {
 // it keeps unknown placeholders untouched.
 func (t *Tmpls) FtExecStd(tmpl string, w io.Writer, data map[string]any) (int64, error) {
 	return ft.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
+}
+
+// FtExecStringStd is a wrapper for fasttemplate.ExecuteStringStd(). Useful for
+// preparing partial templates which will be later included in the main
+// template, because it keeps unknown placeholders untouched. It can be used
+// as a drop-in replacement for strings.Replacer
+func (t *Tmpls) FtExecStringStd(template string, m map[string]any) string {
+	return ft.ExecuteStringStd(template, t.Tags[0], t.Tags[1], m)
 }
 
 func (t *Tmpls) loadFiles() error {
@@ -260,28 +264,25 @@ func (t *Tmpls) findRoot(root string) error {
 		if dirExists(byCwd) {
 			t.root = byCwd
 			return nil
-		} else { // this is dead code but Go compiler made me write it
-			return fmt.Errorf("Tmplsroot directory '%s' does not exist!", byCwd)
+		} else {
+			return fmt.Errorf("Tmpls root directory '%s' does not exist!", byCwd)
 		}
 	}
 
 	if dirExists(root) {
 		t.root = root
 		return nil
-	} else { // this is dead code but Go compiler made me write it
-		return fmt.Errorf("Templates root directory '%s' does not exist!", root)
+	} else {
+		return fmt.Errorf("Tmpls root directory '%s' does not exist!", root)
 	}
 }
 
 func dirExists(path string) bool {
 	finfo, err := os.Stat(path)
-	if err != nil && errors.Is(err, os.ErrNotExist) {
+	if err != nil && errors.Is(err, os.ErrNotExist) || !finfo.IsDir() {
 		return false
 	}
-	if finfo.IsDir() {
-		return true
-	}
-	return false
+	return true
 }
 
 func fileIsReadable(path string) bool {
@@ -308,39 +309,35 @@ func findBinDir() string {
 // reached. If you have deeply nested included files you may need to set a
 // bigger integer.
 func (t *Tmpls) include(text string) (string, error) {
-	restr := spf(`(?m)\Q%s\E(include\s+([/\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])
+	restr := spf(`(?m)\n?\Q%s\E(include\s+([/\.\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
 	reInclude := regexp.MustCompile(restr)
 	matches := reInclude.FindAllStringSubmatch(text, -1)
-	included := bytes.NewBuffer([]byte(""))
+	t.Logger.Debugf("include: %s", matches)
 	howMany := len(matches)
 	if howMany > 0 {
 		data := make(map[string]any, howMany)
 		for _, m := range matches {
 			if t.detectInludeRecurionLimit() {
-				panic(spf("Limit of %d nested inclusions reached"+
-					" while trying to include %s", t.IncludeLimit, m[2]))
+				t.Logger.Panicf("Limit of %d nested inclusions reached"+
+					" while trying to include %s", t.IncludeLimit, m[2])
 				//return text, nil
 			}
 			includedFileContent, err := t.LoadFile(m[2])
 			if err != nil {
 				t.Logger.Warnf("err:%s", err.Error())
-				return text, err
+				return "", err
 			}
-			includedFileContent, err = t.wrap(strings.Trim(includedFileContent, "\n"))
+			includedFileContent, err = t.wrap(includedFileContent)
 			if err != nil {
-				return text, err
+				return "", err
 			}
 			data[m[1]], err = t.include(includedFileContent)
 			if err != nil {
-				return text, err
+				return "", err
 			}
 		}
-
 		// Keep unknown placeholders for the main Execute!
-		if _, err := t.FtExecStd(text, included, data); err != nil {
-			return text, err
-		}
-		return included.String(), nil
+		return t.FtExecStringStd(text, data), nil
 	}
 	return text, nil
 }
@@ -351,18 +348,18 @@ func (t *Tmpls) include(text string) (string, error) {
 // as a regular placeholder. Only one `wrapper` directive is allowed per file.
 // Returns the wrapped template text or the passed text with error.
 func (t *Tmpls) wrap(text string) (string, error) {
-	re := spf(`(?m)\n?\Q%s\E(wrapper\s+([/\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
+	re := spf(`(?m)\n?\Q%s\E(wrapper\s+([/\.\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
 	reWrapper := regexp.MustCompile(re)
 	// allow only one wrapper
 	match := reWrapper.FindAllStringSubmatch(text, 1)
-
+	t.Logger.Debugf("wrapper: %s", match)
 	if len(match) > 0 && len(match[0]) == 3 {
 		wrapper, err := t.LoadFile(string(match[0][2]))
 		if err != nil {
 			return text, err
 		}
-		text = reWrapper.ReplaceAllString(strings.Trim(text, "\n"), "")
-		text = strings.Replace(wrapper, spf("%scontent%s", t.Tags[0], t.Tags[1]), text, 1)
+		text = t.FtExecStringStd(wrapper, map[string]any{
+			"content": t.FtExecStringStd(text, map[string]any{match[0][0]: ""})})
 	}
 	return text, nil
 }
