@@ -308,9 +308,10 @@ func findBinDir() string {
 // reached. If you have deeply nested included files you may need to set a
 // bigger integer.
 func (t *Tmpls) include(text string) (string, error) {
-	restr := spf(`(?m)\Q%s\E(include\s+([/\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])
+	restr := spf(`(?m)\Q%s\E(include\s+([/\.\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])
 	reInclude := regexp.MustCompile(restr)
 	matches := reInclude.FindAllStringSubmatch(text, -1)
+	t.Logger.Debugf("include: %s", matches)
 	included := bytes.NewBuffer([]byte(""))
 	howMany := len(matches)
 	if howMany > 0 {
@@ -351,11 +352,11 @@ func (t *Tmpls) include(text string) (string, error) {
 // as a regular placeholder. Only one `wrapper` directive is allowed per file.
 // Returns the wrapped template text or the passed text with error.
 func (t *Tmpls) wrap(text string) (string, error) {
-	re := spf(`(?m)\n?\Q%s\E(wrapper\s+([/\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
+	re := spf(`(?m)\n?\Q%s\E(wrapper\s+([/\.\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
 	reWrapper := regexp.MustCompile(re)
 	// allow only one wrapper
 	match := reWrapper.FindAllStringSubmatch(text, 1)
-
+	t.Logger.Debugf("wrapper: %s", match)
 	if len(match) > 0 && len(match[0]) == 3 {
 		wrapper, err := t.LoadFile(string(match[0][2]))
 		if err != nil {

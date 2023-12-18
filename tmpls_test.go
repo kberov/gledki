@@ -112,6 +112,7 @@ func TestExecute(t *testing.T) {
 func TestAddExecuteFunc(t *testing.T) {
 
 	tpls, _ := New(templates, ext, [2]string{"${", "}"}, false)
+	tpls.Logger = logger
 
 	tpls.DataMap = DataMap{
 		"a": "a value",
@@ -129,7 +130,7 @@ func TestAddExecuteFunc(t *testing.T) {
 		"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
 	})
 	// Prepare a function for rendering other books
-	tpls.DataMap["other_books"] = ft.TagFunc(func(w io.Writer, tag string) (int, error) {
+	tpls.DataMap["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 		// for more complex file, containing wrapper and include directives, you
 		// must use tpls.Compile("path/to/file")
 		template, err := tpls.LoadFile("partials/_book_item")
@@ -144,7 +145,7 @@ func TestAddExecuteFunc(t *testing.T) {
 			{"book_title": "На пост", "book_author": "Николай Фенерски"},
 		}
 		for _, book := range booksFromDataBase {
-			if _, err := ft.Execute(template, tpls.Tags[0], tpls.Tags[1], rendered, book); err != nil {
+			if _, err := tpls.FtExecStd(template, rendered, book); err != nil {
 				return 0, fmt.Errorf("Problem rendering partial template `_book_item` in 'other_books' TagFunc: %s", err.Error())
 			}
 		}
