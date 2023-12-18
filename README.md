@@ -2,7 +2,7 @@
 A templates and data manager for [fasttemplate](https://github.com/valyala/fasttemplate)
 
 Package tmpls provides a templates and data manager for
-[github.com/valyala/fasttemplate].
+[https://github.com/valyala/fasttemplate].
 
 Because fasttemplate is minimalisitic, the need
 for this wrapper arose. Two template directives were implemented – `wrapper`
@@ -25,16 +25,19 @@ improvements, exspecially for idiomatic Go.
 
 import "github.com/kberov/tmpls"
 //...
-
+var templates = "./testdata/tpls"
+var ext = ".htm"
+var logger *log.Logger
+var tags = [2]string{"${", "}"}
+//...
 // Instantiate the templates manager.
-tpls, _ := tmpls.New(templatesroot, ext, [2]string{"${", "}"}, false)
+tpls, _ := New(templates, ext, tags, false)
+tpls.Logger = logger
 
-// Add some values to be rendered
-tpls.DataMap = tmpls.DataMap{
+tpls.DataMap = DataMap{
 	"a": "a value",
 	"b": "b value",
 }
-
 // ...
 // Later in a galaxy far away
 // ....
@@ -46,9 +49,8 @@ tpls.MergeDataMap(map[string]any{
 	"book_title": "Историософия", "book_author": "Николай Гочев",
 	"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
 })
-
 // Prepare a function for rendering other books
-tpls.DataMap["other_books"] = ft.TagFunc(func(w io.Writer, tag string) (int, error) {
+tpls.DataMap["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 	// for more complex file, containing wrapper and include directives, you
 	// must use tpls.Compile("path/to/file")
 	template, err := tpls.LoadFile("partials/_book_item")
@@ -57,25 +59,25 @@ tpls.DataMap["other_books"] = ft.TagFunc(func(w io.Writer, tag string) (int, err
 		return 0, fmt.Errorf(
 			"Problem loading partial template `_book_item` in 'other_books' TagFunc: %s", err.Error())
 	}
-	rendered := bytes.NewBuffer([]byte(""))
+	booksBB := bytes.NewBuffer([]byte(""))
 	booksFromDataBase := []map[string]any{
 		{"book_title": "Лечителката и рунтавата ѝ… котка", "book_author": "Контадин Кременски"},
 		{"book_title": "На пост", "book_author": "Николай Фенерски"},
 	}
 	for _, book := range booksFromDataBase {
-		if _, err := ft.Execute(template, tpls.Tags[0], tpls.Tags[1], rendered, book); err != nil {
+		if _, err := tpls.FtExecStd(template, booksBB, book); err != nil {
 			return 0, fmt.Errorf("Problem rendering partial template `_book_item` in 'other_books' TagFunc: %s", err.Error())
 		}
 	}
-	return w.Write(rendered.Bytes())
+	return w.Write(booksBB.Bytes())
 })
 
-// Even later, when the whole output is put together
+// Even later, when the whole page is put together
 _, err := tpls.Execute(os.Stdout, "book")
 if err != nil {
-	log.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
+	t.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
 }
 
 ```
 
-See other examples in [./tmpls/tmpls_test.go] and [./tmpls/example_test.go]
+See other examples in [tmpls_test.go] and [example_test.go]
