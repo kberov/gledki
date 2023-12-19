@@ -35,22 +35,20 @@ import (
 // TagFunc is an alias for fasttemplate.TagFunc
 type TagFunc = ft.TagFunc
 
-var spf = fmt.Sprintf
-
 // path => slurped file content
 type filesMap map[string]string
 
-// DataMap is a stash for replacement into templates. Can have the same value types, needed
+// Stash is a stash for replacement into templates. Can have the same value types, needed
 // for fasttemplate:
 //   - []byte - the fastest value type
 //   - string - convenient value type
 //   - TagFunc - flexible value type
-type DataMap map[string]any
+type Stash map[string]any
 
 // Tmpls manages files and data for fasttemplate.
 type Tmpls struct {
 	// A map for replacement into templates
-	DataMap DataMap
+	Stash Stash
 	// file name => file contents
 	files filesMap
 	// compiled templates
@@ -71,14 +69,17 @@ type Tmpls struct {
 }
 
 const defaultLogHeader = `${prefix}:${time_rfc3339}:${level}:${short_file}:${line}`
+const compiledSufix = "c"
 
-// New instantiates a new [Tmpls] struct and returns it. Prepares [DataMap] and
+var spf = fmt.Sprintf
+
+// New instantiates a new [Tmpls] struct and returns it. Prepares [Stash] and
 // loads all template files from disk under the given `root` if `loadFiles` is
 // true. Otherwise postpones the loading of the needed file until
 // [Tmpls.Compile] is invoked automatically in [Tmpls.Execute].
 func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error) {
 	t := &Tmpls{
-		DataMap:      make(DataMap, 5),
+		Stash:        make(Stash, 5),
 		compiled:     make(filesMap, 5),
 		files:        make(filesMap, 5),
 		Ext:          ext,
@@ -112,9 +113,9 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error
 //   - The compiled template is stored in a private map[filename(string)]string,
 //     attached to *Tmpls for subsequent use during the same run of the
 //     application. The content of the compiled template is stored on disk with
-//     a sufix "c", attached to the extension of the file in the same directory
-//     where the template file resides. The storing of the compiled file is
-//     done concurently in a goroutine while being executed.
+//     a sufix (currently "c"), attached to the extension of the file in the
+//     same directory where the template file resides. The storing of the
+//     compiled file is done concurently in a goroutine while being executed.
 //   - On the next run of the application the compiled file is simply loaded
 //     and its content retuned. All the steps above are skipped.
 //
@@ -149,7 +150,7 @@ func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
 		return text, nil
 	}
 	t.Logger.Debugf("loadCompiled('%s')", fullPath)
-	fullPath = fullPath + "c"
+	fullPath = fullPath + compiledSufix
 	if fileIsReadable(fullPath) {
 		data, _ := os.ReadFile(fullPath)
 		t.compiled[fullPath] = string(data)
@@ -161,7 +162,7 @@ func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
 func (t *Tmpls) storeCompiled(fullPath, text string) {
 	defer t.wg.Done()
 	t.Logger.Debugf("storeCompiled('%s')", fullPath)
-	err := os.WriteFile(fullPath+"c", []byte(text), 0600)
+	err := os.WriteFile(fullPath+compiledSufix, []byte(text), 0600)
 	if err != nil {
 		t.Logger.Panic(err)
 	}
@@ -178,7 +179,7 @@ func (t *Tmpls) Execute(w io.Writer, path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.DataMap)
+	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.Stash)
 	t.wg.Wait()
 	return length, err
 
@@ -239,19 +240,19 @@ func (t *Tmpls) toFullPath(path string) string {
 	return path
 }
 
-// MergeDataMap adds entries into the data map, used by
+// MergeStash adds entries into the data map, used by
 // fasttemplate.Execute(...) in [Tmpls.Execute]. If entries with the same key
 // exist, they will be overriden with the new values.
-func (t *Tmpls) MergeDataMap(data DataMap) {
+func (t *Tmpls) MergeStash(data Stash) {
 	for k, v := range data {
-		t.DataMap[k] = v
+		t.Stash[k] = v
 	}
 }
 
 // Tries to return an existing absolute path to the given root path. If the
 // provided root is relative, the function expects the root to be relative to
 // the Executable file or to the current working directory. If the root does
-// not exist, this function panics.
+// not exist, this function returns an error.
 func (t *Tmpls) findRoot(root string) error {
 	if !filepath.IsAbs(root) {
 		byExe := filepath.Join(findBinDir(), root)
@@ -309,7 +310,7 @@ func findBinDir() string {
 // reached. If you have deeply nested included files you may need to set a
 // bigger integer.
 func (t *Tmpls) include(text string) (string, error) {
-	restr := spf(`(?m)\n?\Q%s\E(include\s+([/\.\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
+	restr := spf(`[\r\n\s]*\Q%s\E(include\s+([/\.\w]+))\Q%s\E[\r\n\s]*`, t.Tags[0], t.Tags[1])
 	reInclude := regexp.MustCompile(restr)
 	matches := reInclude.FindAllStringSubmatch(text, -1)
 	t.Logger.Debugf("include: %s", matches)
@@ -317,7 +318,7 @@ func (t *Tmpls) include(text string) (string, error) {
 	if howMany > 0 {
 		data := make(map[string]any, howMany)
 		for _, m := range matches {
-			if t.detectInludeRecurionLimit() {
+			if t.detectInludeRecursionLimit() {
 				t.Logger.Panicf("Limit of %d nested inclusions reached"+
 					" while trying to include %s", t.IncludeLimit, m[2])
 				//return text, nil
@@ -331,7 +332,7 @@ func (t *Tmpls) include(text string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			data[m[1]], err = t.include(includedFileContent)
+			data[m[1]], err = t.include(strings.Trim(includedFileContent, "\n"))
 			if err != nil {
 				return "", err
 			}
@@ -342,13 +343,13 @@ func (t *Tmpls) include(text string) (string, error) {
 	return text, nil
 }
 
-// If a template file contains `${wrap some/file}`, then `some/file` is
-// loaded and the content is put in it in place of `${content}`. This
-// means that `content` tag is special in wrapper templates and cannot be used
-// as a regular placeholder. Only one `wrapper` directive is allowed per file.
+// If a template file contains `${wrap some/file}`, then `some/file` is loaded
+// and the content is put in it in place of `${content}`. This means that
+// `content` placeholder is special in wrapper templates and cannot be used as
+// a regular placeholder. Only one `wrapper` directive is allowed per file.
 // Returns the wrapped template text or the passed text with error.
 func (t *Tmpls) wrap(text string) (string, error) {
-	re := spf(`(?m)\n?\Q%s\E(wrapper\s+([/\.\w]+))\Q%s\E\n?`, t.Tags[0], t.Tags[1])
+	re := spf(`[\r\n\s]*\Q%s\E(wrapper[\r\n\s]+([/\.\w]+))\Q%s\E[\r\n\s]*`, t.Tags[0], t.Tags[1])
 	reWrapper := regexp.MustCompile(re)
 	// allow only one wrapper
 	match := reWrapper.FindAllStringSubmatch(text, 1)
@@ -359,7 +360,8 @@ func (t *Tmpls) wrap(text string) (string, error) {
 			return text, err
 		}
 		text = t.FtExecStringStd(wrapper, map[string]any{
-			"content": t.FtExecStringStd(text, map[string]any{match[0][0]: ""})})
+			"content": t.FtExecStringStd(text, map[string]any{match[0][0]: ""}),
+		})
 	}
 	return text, nil
 }
@@ -368,7 +370,7 @@ func (t *Tmpls) wrap(text string) (string, error) {
 // frames < t.IncludeLimit : direct recursion - calls it self - still fine.
 // frames == t.IncludeLimit : indirect - some caller on t.IncludeLimit call
 // frame still calls the same function - too many recursion levels - stop.
-func (t *Tmpls) detectInludeRecurionLimit() bool {
+func (t *Tmpls) detectInludeRecursionLimit() bool {
 	pcme, _, _, _ := runtime.Caller(1)
 	detailsme := runtime.FuncForPC(pcme)
 	pc, _, _, _ := runtime.Caller(1 + t.IncludeLimit)

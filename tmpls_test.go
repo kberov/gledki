@@ -11,45 +11,45 @@ import (
 	"testing"
 
 	"github.com/labstack/gommon/log"
-	ft "github.com/valyala/fasttemplate"
 )
 
-var templates = "./testdata/tpls"
-var ext = ".htm"
+var templatesDir = "./testdata/tpls"
+var filesExt = ".htm"
 var logger *log.Logger
-var tags = [2]string{"${", "}"}
+var tagsPair = [2]string{"${", "}"}
 var out strings.Builder
 
 // remove all compiled previously templates
 func init() {
-	sfx := ext + "c"
-	filepath.WalkDir(templates, func(path string, d fs.DirEntry, err error) error {
+	sfx := filesExt + compiledSufix
+	filepath.WalkDir(templatesDir, func(path string, d fs.DirEntry, err error) error {
 		if strings.HasSuffix(path, sfx) {
 			os.Remove(path)
 		}
 		return err
 	})
+	var lgbuf = bytes.NewBuffer([]byte(""))
 	logger = log.New("tmpls")
-	logger.SetOutput(os.Stderr)
+	logger.SetOutput(lgbuf)
 	logger.SetLevel(log.DEBUG)
 	logger.SetHeader(defaultLogHeader)
 }
 
 func TestNew(t *testing.T) {
 	// load templates
-	tpls, err := New(templates, ext, tags, true)
+	tpls, err := New(templatesDir, filesExt, tagsPair, true)
 	tpls.Logger = logger
 	if err != nil {
 		t.Fatal("Error New: ", err.Error())
 	} else {
-		t.Logf("\ntmpls.New loads all files in %s", templates)
+		t.Logf("\ntmpls.New loads all files in %s", templatesDir)
 		for k := range tpls.files {
 			_ = k
 			//	t.Logf("file: %s", k)
 		}
 	}
 	// do not load templates
-	tpls, err = New(templates, ext, tags, false)
+	tpls, err = New(templatesDir, filesExt, tagsPair, false)
 	tpls.Logger = logger
 	if err != nil {
 		t.Fatal("Eror New: ", err.Error())
@@ -58,17 +58,59 @@ func TestNew(t *testing.T) {
 		t.Fatal("templates should not be loaded")
 	}
 	//Try to load nonreadable templates
-	os.Chmod(templates+"/../tpls_bad/_noread.htm", 0300)
-	_, err = New(templates+"/../tpls_bad", ext, tags, true)
+	os.Chmod(templatesDir+"/../tpls_bad/_noread.htm", 0300)
+	_, err = New(templatesDir+"/../tpls_bad", filesExt, tagsPair, true)
 	if err != nil {
 		t.Logf("Expected error from New: %s", err.Error())
-		os.Chmod(templates+"/../tpls_bad/_noread.htm", 0400)
+		os.Chmod(templatesDir+"/../tpls_bad/_noread.htm", 0400)
 	} else {
 		t.Fatal("Reading nonreadable file should have failed!")
 	}
 }
 
-var data = DataMap{
+func ExampleNew() {
+	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
+	fmt.Printf(`A Tmpls object properties:
+	Stash: %#v
+	Ext: %#v
+	root: %s
+	Tags: %#v
+	IncludeLimit: %d
+	Logger: %T from "github.com/labstack/gommon/log"
+`, tpls.Stash, tpls.Ext, tpls.root,
+		tpls.Tags, tpls.IncludeLimit, tpls.Logger)
+
+	// Output:
+	// A Tmpls object properties:
+	//	Stash: tmpls.Stash{}
+	//	Ext: ".htm"
+	//	root: /home/berov/opt/dev/tmpls/testdata/tpls
+	//	Tags: [2]string{"${", "}"}
+	//	IncludeLimit: 3
+	//	Logger: *log.Logger from "github.com/labstack/gommon/log"
+
+	// New may return various errors
+	if _, err := New("/ala/bala", filesExt, tagsPair, false); err != nil {
+		fmt.Println(err.Error())
+	}
+
+	// Tmpls root directory '/ala/bala' does not exist!
+
+}
+
+func ExampleNew_err() {
+
+	// New may return various errors
+	if _, err := New("/ala/bala", filesExt, tagsPair, false); err != nil {
+		fmt.Println(err.Error())
+	}
+
+	// Output:
+	// Tmpls root directory '/ala/bala' does not exist!
+
+}
+
+var data = Stash{
 	"title":     "Здрасти",
 	"body":      "<p>Едно тяло тук</p>",
 	"lang":      "bg",
@@ -77,9 +119,9 @@ var data = DataMap{
 }
 
 func TestExecute(t *testing.T) {
-	tpls, _ := New(templates, ext, tags, false)
+	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
 	tpls.Logger = logger
-	tpls.DataMap = data
+	tpls.Stash = data
 	var out strings.Builder
 	_, _ = tpls.Execute(&out, "view")
 	outstr := out.String()
@@ -93,7 +135,7 @@ func TestExecute(t *testing.T) {
 	//Change keys and check if they ar changed in the output
 	// Same view with other data
 	t.Log("=================")
-	tpls.DataMap = DataMap{
+	tpls.Stash = Stash{
 		"title":     "Hello",
 		"body":      "<p>A body here</p>",
 		"lang":      "en",
@@ -104,7 +146,7 @@ func TestExecute(t *testing.T) {
 	_, _ = tpls.Execute(&out, "view")
 	outstr = out.String()
 	t.Log(outstr)
-	for k, v := range tpls.DataMap {
+	for k, v := range tpls.Stash {
 		if !strings.Contains(outstr, v.(string)) {
 			t.Fatalf("output does not contain expected value for '%s': %s", k, v)
 		}
@@ -116,19 +158,59 @@ func TestExecute(t *testing.T) {
 	_, _ = tpls.Execute(&out, "view")
 	outstr = out.String()
 	t.Log(outstr)
-	for k, v := range tpls.DataMap {
+	for k, v := range tpls.Stash {
 		if !strings.Contains(outstr, v.(string)) {
 			t.Fatalf("output does not contain expected value for '%s': %s", k, v)
 		}
 	}
 }
 
+func ExampleTmpls_Execute_simple() {
+
+	// Once on startup. Notice that we use now "<%" and "%>" as tags . "${" and
+	// "}" will stay.
+	tpls, _ := New(templatesDir, filesExt, [2]string{"<%", "%>"}, false)
+	tpls.Logger.SetLevel(log.DEBUG)
+	// ...
+	// Later... many times and with various data
+	tpls.Stash = map[string]any{"generator": "Изгледи"}
+	tpls.MergeStash(map[string]any{
+		"title": "Hello",
+		"body": TagFunc(func(w io.Writer, tag string) (int, error) {
+			// very powerful...
+			tpls.Stash["generator"] = "Something"
+			return w.Write([]byte("Some complex callculations to construct the body."))
+		}),
+	})
+
+	// Even later - many times - on each response
+	tpls.Execute(os.Stdout, "simple")
+	// Output:
+	// <!doctype html>
+	// <html lang="">
+	// <head>
+	// <meta charset="UTF-8">
+	// <meta name="generator" content="Изгледи">
+	// <title>Hello</title>
+	// </head>
+	// <body>
+	//
+	// <header><h1>Hello</h1></header>
+	// <h1>Hello</h1>
+	// <section>Some complex callculations to construct the body. Changed generator to "Something"</section>
+	// <footer>Тази страница бе създадена с ${generator} и ${included}.</footer>
+	//
+	//
+	// </body>
+	// </html>
+}
+
 func TestAddExecuteFunc(t *testing.T) {
 
-	tpls, _ := New(templates, ext, tags, false)
+	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
 	tpls.Logger = logger
 
-	tpls.DataMap = DataMap{
+	tpls.Stash = Stash{
 		"a": "a value",
 		"b": "b value",
 	}
@@ -136,7 +218,7 @@ func TestAddExecuteFunc(t *testing.T) {
 	// Later in a galaxy far away
 	// ....
 	// Prepare a book for display and prepare a list of other books
-	tpls.MergeDataMap(map[string]any{
+	tpls.MergeStash(map[string]any{
 		"lang":       "en",
 		"generator":  "Tmpls",
 		"included":   "вложена",
@@ -144,7 +226,7 @@ func TestAddExecuteFunc(t *testing.T) {
 		"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
 	})
 	// Prepare a function for rendering other books
-	tpls.DataMap["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
+	tpls.Stash["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 		// for more complex file, containing wrapper and include directives, you
 		// must use tpls.Compile("path/to/file")
 		template, err := tpls.LoadFile("partials/_book_item")
@@ -174,14 +256,14 @@ func TestAddExecuteFunc(t *testing.T) {
 }
 
 func TestIncludeLimitPanic(t *testing.T) {
-	tpls, _ := New(templates, ext, tags, false)
-	tpls.DataMap = DataMap{
+	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
+	tpls.Stash = Stash{
 		"title":     "Possibly recursive inclusions",
 		"generator": "Tmpls",
 		"included":  "included",
 	}
 	level := 0
-	tpls.DataMap["level"] = TagFunc(func(w io.Writer, tag string) (int, error) {
+	tpls.Stash["level"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 		level++
 		return w.Write([]byte(spf("%d", level)))
 	})
@@ -191,7 +273,7 @@ func TestIncludeLimitPanic(t *testing.T) {
 
 func TestOtherPanics(t *testing.T) {
 
-	tpls, _ := New(templates, ext, tags, false)
+	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
 	path := "/ff/a.htm"
 	tpls.compiled[path] = "bla"
 	tpls.wg.Add(1)
@@ -199,15 +281,15 @@ func TestOtherPanics(t *testing.T) {
 }
 
 func TestIncludeLimitNoPanic(t *testing.T) {
-	tpls, _ := New(templates, ext, tags, false)
+	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
 
-	tpls.DataMap = DataMap{
+	tpls.Stash = Stash{
 		"title":     "Possibly recursive inclusions",
 		"generator": "Tmpls",
 		"included":  "included",
 	}
 	level := 0
-	tpls.DataMap["level"] = ft.TagFunc(func(w io.Writer, tag string) (int, error) {
+	tpls.Stash["level"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 		level++
 		return w.Write([]byte(spf("%d", level)))
 	})
@@ -229,7 +311,7 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 
-	if _, err := New("/ala/bala/nica", ext, tags, false); err != nil {
+	if _, err := New("/ala/bala/nica", filesExt, tagsPair, false); err != nil {
 		errstr := err.Error()
 		if strings.Contains(errstr, "does not exist") {
 			t.Logf("Right error: %s", err.Error())
@@ -239,7 +321,7 @@ func TestErrors(t *testing.T) {
 	} else {
 		t.Fatal("No error - this is unexpected!")
 	}
-	tpls, _ := New(templates+"/../tpls_bad", ext, tags, false)
+	tpls, _ := New(templatesDir+"/../tpls_bad", filesExt, tagsPair, false)
 	tpls.Logger = logger
 	out.Reset()
 	if _, err := tpls.Execute(&out, "no_wrapper"); err != nil {
@@ -300,7 +382,7 @@ func TestErrors(t *testing.T) {
 		t.Fatalf("No error - this is unexpected! Output: %s", out.String())
 	}
 
-	absRoot, err := filepath.Abs(templates)
+	absRoot, err := filepath.Abs(templatesDir)
 	if err != nil {
 		t.Fatalf("Error finding absolute path: %s", err.Error())
 	}
