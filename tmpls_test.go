@@ -167,8 +167,7 @@ func TestExecute(t *testing.T) {
 
 func ExampleTmpls_Execute_simple() {
 
-	// Once on startup. Notice that we use now "<%" and "%>" as tags . "${" and
-	// "}" will stay.
+	// Once on startup.
 	tpls, _ := New(templatesDir, filesExt, [2]string{"<%", "%>"}, false)
 	tpls.Logger.SetLevel(log.DEBUG)
 	// ...
@@ -177,31 +176,33 @@ func ExampleTmpls_Execute_simple() {
 	tpls.MergeStash(map[string]any{
 		"title": "Hello",
 		"body": TagFunc(func(w io.Writer, tag string) (int, error) {
-			// very powerful...
+			// tmpls.Stash entries and even the entire Stash can be modified
+			// from within tmpls.TagFunc
 			tpls.Stash["generator"] = "Something"
-			return w.Write([]byte("Some complex callculations to construct the body."))
+			return w.Write([]byte("<p>Some complex callculations to construct the body.</p>"))
 		}),
 	})
 
 	// Even later - many times - on each response
+	// See used templates in testdata/tpls.
 	tpls.Execute(os.Stdout, "simple")
 	// Output:
 	// <!doctype html>
-	// <html lang="">
-	// <head>
-	// <meta charset="UTF-8">
-	// <meta name="generator" content="Изгледи">
-	// <title>Hello</title>
-	// </head>
-	// <body>
-	//
-	// <header><h1>Hello</h1></header>
-	// <h1>Hello</h1>
-	// <section>Some complex callculations to construct the body. Changed generator to "Something"</section>
-	// <footer>Тази страница бе създадена с ${generator} и ${included}.</footer>
-	//
-	//
-	// </body>
+	// <html>
+	//     <head>
+	//         <meta charset="UTF-8">
+	//         <meta name="generator" content="Изгледи">
+	//         <title>Hello</title>
+	//     </head>
+	//     <body>
+	//         <header><h1>Hello</h1></header>
+	//         <h1>Hello</h1>
+	//         <section>
+	//             <p>Some complex callculations to construct the body.</p>
+	//             <p>Changed generator to "Something".</p>
+	//         </section>
+	//         <footer>Тази страница бе създадена с Something.</footer>
+	//     </body>
 	// </html>
 }
 
@@ -225,7 +226,8 @@ func TestAddExecuteFunc(t *testing.T) {
 		"book_title": "Историософия", "book_author": "Николай Гочев",
 		"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
 	})
-	// Prepare a function for rendering other books
+	// Prepare a function for rendering other books.
+	// Its result should replace "other_books".
 	tpls.Stash["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 		// for more complex file, containing wrapper and include directives, you
 		// must use tpls.Compile("path/to/file")
