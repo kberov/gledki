@@ -182,7 +182,6 @@ func (t *Tmpls) Execute(w io.Writer, path string) (int64, error) {
 	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.Stash)
 	t.wg.Wait()
 	return length, err
-
 }
 
 // FtExecStd is a wrapper for fasttemplate.ExecuteStd(). Useful for preparing
@@ -310,13 +309,13 @@ func findBinDir() string {
 // reached. If you have deeply nested included files you may need to set a
 // bigger integer.
 func (t *Tmpls) include(text string) (string, error) {
-	restr := spf(`[\r\n\s]*\Q%s\E(include\s+([/\.\w]+))\Q%s\E[\r\n\s]*`, t.Tags[0], t.Tags[1])
-	reInclude := regexp.MustCompile(restr)
-	matches := reInclude.FindAllStringSubmatch(text, -1)
-	t.Logger.Debugf("include: %s", matches)
+	restr := spf(`\Q%s\E(include\s+([/\.\-\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])
+	re := regexp.MustCompile(restr)
+	matches := re.FindAllStringSubmatch(text, -1)
 	howMany := len(matches)
 	if howMany > 0 {
-		data := make(map[string]any, howMany)
+		t.Logger.Debugf("include: %#v", matches)
+		stash := make(map[string]any, howMany)
 		for _, m := range matches {
 			if t.detectInludeRecursionLimit() {
 				t.Logger.Panicf("Limit of %d nested inclusions reached"+
@@ -328,17 +327,17 @@ func (t *Tmpls) include(text string) (string, error) {
 				t.Logger.Warnf("err:%s", err.Error())
 				return "", err
 			}
-			includedFileContent, err = t.wrap(includedFileContent)
+			includedFileContent, err = t.wrap(strings.TrimSuffix(includedFileContent, "\n"))
 			if err != nil {
 				return "", err
 			}
-			data[m[1]], err = t.include(strings.Trim(includedFileContent, "\n"))
+			stash[m[1]], err = t.include(includedFileContent)
 			if err != nil {
 				return "", err
 			}
 		}
 		// Keep unknown placeholders for the main Execute!
-		return t.FtExecStringStd(text, data), nil
+		return t.FtExecStringStd(text, stash), nil
 	}
 	return text, nil
 }
@@ -349,19 +348,22 @@ func (t *Tmpls) include(text string) (string, error) {
 // a regular placeholder. Only one `wrapper` directive is allowed per file.
 // Returns the wrapped template text or the passed text with error.
 func (t *Tmpls) wrap(text string) (string, error) {
-	re := spf(`[\r\n\s]*\Q%s\E(wrapper[\r\n\s]+([/\.\w]+))\Q%s\E[\r\n\s]*`, t.Tags[0], t.Tags[1])
-	reWrapper := regexp.MustCompile(re)
+	text = strings.TrimSuffix(text, "\n")
+	restring := spf(`(?m:(\Q%s\Ewrapper\s+([/\.\-\w]+)\Q%s\E\n?))`, t.Tags[0], t.Tags[1])
+	re := regexp.MustCompile(restring)
 	// allow only one wrapper
-	match := reWrapper.FindAllStringSubmatch(text, 1)
-	t.Logger.Debugf("wrapper: %s", match)
-	if len(match) > 0 && len(match[0]) == 3 {
-		wrapper, err := t.LoadFile(string(match[0][2]))
+	match := re.FindStringSubmatch(text)
+	if len(match) > 0 {
+		t.Logger.Debugf("wrapper: %#v", match)
+		wrapperFile, err := t.LoadFile(string(match[2]))
 		if err != nil {
-			return text, err
+			return "", err
 		}
-		text = t.FtExecStringStd(wrapper, map[string]any{
-			"content": t.FtExecStringStd(text, map[string]any{match[0][0]: ""}),
-		})
+		wrapperFile = strings.TrimSuffix(wrapperFile, "\n")
+		// remove the matched m[1] from text
+		text = strings.Replace(text, match[1], "", 1)
+		// replace content with text
+		text = t.FtExecStringStd(wrapperFile, map[string]any{"content": text})
 	}
 	return text, nil
 }
