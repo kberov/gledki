@@ -1,4 +1,4 @@
-module github.com/kberov/tmpls
+module github.com/kberov/gledki
 
 go 1.21.4
 
