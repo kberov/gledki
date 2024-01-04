@@ -1,5 +1,5 @@
 /*
-Package tmpls provides a templates and data manager for
+Package gledki provides a templates and data manager for
 [pkg/github.com/valyala/fasttemplate].
 
 Because [pkg/github.com/valyala/fasttemplate] is minimalisitic, the need
@@ -8,12 +8,12 @@ and `include`. These make this simple templates manager powerful enough for
 big and complex sites or generating any text output.
 
 The main template can be compiled from several files – as many as you need –
-with the simple approach of wrapping and including files recursively.
+with the simple approach of wrapping and including partial files recursively.
 fasttemplate's TagFunc allows us to keep logic into our Go code and prepare
 pieces of the output as needed. See the tests and sample templates for usage
 examples.
 */
-package tmpls
+package gledki
 
 import (
 	"errors"
@@ -45,8 +45,8 @@ type filesMap map[string]string
 //   - TagFunc - flexible value type
 type Stash map[string]any
 
-// Tmpls manages files and data for fasttemplate.
-type Tmpls struct {
+// Gledki manages files and data for fasttemplate.
+type Gledki struct {
 	// A map for replacement into templates
 	Stash Stash
 	// file name => file contents
@@ -65,7 +65,9 @@ type Tmpls struct {
 	// To wait for storeCompiled() to finish.
 	wg sync.WaitGroup
 	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
-	Logger Logger
+	Logger
+	// regex objects instantiated in New() and ready for use.
+	res map[string]*regexp.Regexp
 }
 
 const defaultLogHeader = `${prefix}:${time_rfc3339}:${level}:${short_file}:${line}`
@@ -73,19 +75,19 @@ const compiledSufix = "c"
 
 var spf = fmt.Sprintf
 
-// New instantiates a new [Tmpls] struct and returns it. Prepares [Stash] and
+// New instantiates a new [Gledki] struct and returns it. Prepares [Stash] and
 // loads all template files from disk under the given `root` if `loadFiles` is
 // true. Otherwise postpones the loading of the needed file until
-// [Tmpls.Compile] is invoked automatically in [Tmpls.Execute].
-func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error) {
-	t := &Tmpls{
+// [Gledki.Compile] is invoked automatically in [Gledki.Execute].
+func New(root string, ext string, tags [2]string, loadFiles bool) (*Gledki, error) {
+	t := &Gledki{
 		Stash:        make(Stash, 5),
 		compiled:     make(filesMap, 5),
 		files:        make(filesMap, 5),
 		Ext:          ext,
 		Tags:         tags,
 		IncludeLimit: 3,
-		Logger:       log.New("tmpls"),
+		Logger:       log.New("gledki"),
 	}
 	if err := t.findRoot(root); err != nil {
 		return nil, err
@@ -98,20 +100,21 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error
 			return nil, err
 		}
 	}
+	t.makeRegexes()
 	return t, nil
 }
 
 // Compile composes a template and returns its content or an error. This means:
-//   - The file is loaded from disk using [Tmpls.LoadFile] for use by
-//     [Tmpls.Execute].
+//   - The file is loaded from disk using [Gledki.LoadFile] for use by
+//     [Gledki.Execute].
 //   - if the template contains `${wrapper some/file}`, the wrapper file is
 //     wrapped around it.
 //   - if the template contains any `${include some/file}` the files are
 //     loaded, wrapped (if there is a wrapper directive in them) and included
 //     at these places without rendering any placeholders. The inclusion
-//     is done recursively. See *Tmpls.IncludeLimit.
+//     is done recursively. See *Gledki.IncludeLimit.
 //   - The compiled template is stored in a private map[filename(string)]string,
-//     attached to *Tmpls for subsequent use during the same run of the
+//     attached to *Gledki for subsequent use during the same run of the
 //     application. The content of the compiled template is stored on disk with
 //     a sufix (currently "c"), attached to the extension of the file in the
 //     same directory where the template file resides. The storing of the
@@ -119,10 +122,10 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Tmpls, error
 //   - On the next run of the application the compiled file is simply loaded
 //     and its content retuned. All the steps above are skipped.
 //
-// Panics in case the *Tmpls.IncludeLimit is reached. If you have deeply nested
+// Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
 // included files you may need to set a bigger integer. This method is suitable
 // for use in a ft.TagFunc to compile parts to be replaced in bigger templates.
-func (t *Tmpls) Compile(path string) (string, error) {
+func (t *Gledki) Compile(path string) (string, error) {
 	path = t.toFullPath(path)
 	if text, e := t.loadCompiled(path); e == nil {
 		return text, nil
@@ -145,7 +148,7 @@ func (t *Tmpls) Compile(path string) (string, error) {
 	return t.compiled[path], nil
 }
 
-func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
+func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 	if text, ok := t.compiled[fullPath]; ok {
 		return text, nil
 	}
@@ -159,7 +162,7 @@ func (t *Tmpls) loadCompiled(fullPath string) (string, error) {
 	return "", errors.New(spf("File '%s' could not be read!", fullPath))
 }
 
-func (t *Tmpls) storeCompiled(fullPath, text string) {
+func (t *Gledki) storeCompiled(fullPath, text string) {
 	defer t.wg.Done()
 	t.Logger.Debugf("storeCompiled('%s')", fullPath)
 	err := os.WriteFile(fullPath+compiledSufix, []byte(text), 0600)
@@ -174,7 +177,7 @@ var ftExec = ft.Execute
 // fasttemplate.Execute. The path is resolved by prefixing the root folder
 // and attaching the extension, passed to [New], if the passed file is only a
 // base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
-func (t *Tmpls) Execute(w io.Writer, path string) (int64, error) {
+func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 	text, err := t.Compile(path)
 	if err != nil {
 		return 0, err
@@ -187,7 +190,7 @@ func (t *Tmpls) Execute(w io.Writer, path string) (int64, error) {
 // FtExecStd is a wrapper for fasttemplate.ExecuteStd(). Useful for preparing
 // partial templates which will be later included in the main template, because
 // it keeps unknown placeholders untouched.
-func (t *Tmpls) FtExecStd(tmpl string, w io.Writer, data map[string]any) (int64, error) {
+func (t *Gledki) FtExecStd(tmpl string, w io.Writer, data map[string]any) (int64, error) {
 	return ft.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
 }
 
@@ -195,11 +198,11 @@ func (t *Tmpls) FtExecStd(tmpl string, w io.Writer, data map[string]any) (int64,
 // preparing partial templates which will be later included in the main
 // template, because it keeps unknown placeholders untouched. It can be used
 // as a drop-in replacement for strings.Replacer
-func (t *Tmpls) FtExecStringStd(template string, m map[string]any) string {
+func (t *Gledki) FtExecStringStd(template string, m map[string]any) string {
 	return ft.ExecuteStringStd(template, t.Tags[0], t.Tags[1], m)
 }
 
-func (t *Tmpls) loadFiles() error {
+func (t *Gledki) loadFiles() error {
 	return filepath.WalkDir(t.root, func(path string, d fs.DirEntry, err error) error {
 		if strings.HasSuffix(path, t.Ext) {
 			if _, err = t.LoadFile(path); err != nil {
@@ -213,7 +216,7 @@ func (t *Tmpls) loadFiles() error {
 // LoadFile is used to load a template from disk or from cache, if already
 // loaded before.  Returns the template text or error if template cannot be
 // loaded.
-func (t *Tmpls) LoadFile(path string) (string, error) {
+func (t *Gledki) LoadFile(path string) (string, error) {
 	path = t.toFullPath(path)
 	if text, ok := t.files[path]; ok && len(text) > 0 {
 		return text, nil
@@ -229,7 +232,7 @@ func (t *Tmpls) LoadFile(path string) (string, error) {
 	return "", errors.New(spf("File '%s' could not be read!", path))
 }
 
-func (t *Tmpls) toFullPath(path string) string {
+func (t *Gledki) toFullPath(path string) string {
 	if !strings.HasSuffix(path, t.Ext) {
 		path = path + t.Ext
 	}
@@ -240,9 +243,9 @@ func (t *Tmpls) toFullPath(path string) string {
 }
 
 // MergeStash adds entries into the data map, used by
-// fasttemplate.Execute(...) in [Tmpls.Execute]. If entries with the same key
+// fasttemplate.Execute(...) in [Gledki.Execute]. If entries with the same key
 // exist, they will be overriden with the new values.
-func (t *Tmpls) MergeStash(data Stash) {
+func (t *Gledki) MergeStash(data Stash) {
 	for k, v := range data {
 		t.Stash[k] = v
 	}
@@ -252,7 +255,7 @@ func (t *Tmpls) MergeStash(data Stash) {
 // provided root is relative, the function expects the root to be relative to
 // the Executable file or to the current working directory. If the root does
 // not exist, this function returns an error.
-func (t *Tmpls) findRoot(root string) error {
+func (t *Gledki) findRoot(root string) error {
 	if !filepath.IsAbs(root) {
 		byExe := filepath.Join(findBinDir(), root)
 		if dirExists(byExe) {
@@ -265,7 +268,7 @@ func (t *Tmpls) findRoot(root string) error {
 			t.root = byCwd
 			return nil
 		} else {
-			return fmt.Errorf("Tmpls root directory '%s' does not exist!", byCwd)
+			return fmt.Errorf("Gledki root directory '%s' does not exist!", byCwd)
 		}
 	}
 
@@ -273,7 +276,7 @@ func (t *Tmpls) findRoot(root string) error {
 		t.root = root
 		return nil
 	} else {
-		return fmt.Errorf("Tmpls root directory '%s' does not exist!", root)
+		return fmt.Errorf("Gledki root directory '%s' does not exist!", root)
 	}
 }
 
@@ -308,9 +311,8 @@ func findBinDir() string {
 // contents of the partial templates. Panics in case the t.IncludeLimit is
 // reached. If you have deeply nested included files you may need to set a
 // bigger integer.
-func (t *Tmpls) include(text string) (string, error) {
-	restr := spf(`\Q%s\E(include\s+([/\.\-\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])
-	re := regexp.MustCompile(restr)
+func (t *Gledki) include(text string) (string, error) {
+	re := t.res["include"]
 	matches := re.FindAllStringSubmatch(text, -1)
 	howMany := len(matches)
 	if howMany > 0 {
@@ -347,10 +349,9 @@ func (t *Tmpls) include(text string) (string, error) {
 // `content` placeholder is special in wrapper templates and cannot be used as
 // a regular placeholder. Only one `wrapper` directive is allowed per file.
 // Returns the wrapped template text or the passed text with error.
-func (t *Tmpls) wrap(text string) (string, error) {
+func (t *Gledki) wrap(text string) (string, error) {
 	text = strings.TrimSuffix(text, "\n")
-	restring := spf(`(?m:(\Q%s\Ewrapper\s+([/\.\-\w]+)\Q%s\E\n?))`, t.Tags[0], t.Tags[1])
-	re := regexp.MustCompile(restring)
+	re := t.res["wrap"]
 	// allow only one wrapper
 	match := re.FindStringSubmatch(text)
 	if len(match) > 0 {
@@ -372,12 +373,24 @@ func (t *Tmpls) wrap(text string) (string, error) {
 // frames < t.IncludeLimit : direct recursion - calls it self - still fine.
 // frames == t.IncludeLimit : indirect - some caller on t.IncludeLimit call
 // frame still calls the same function - too many recursion levels - stop.
-func (t *Tmpls) detectInludeRecursionLimit() bool {
+func (t *Gledki) detectInludeRecursionLimit() bool {
 	pcme, _, _, _ := runtime.Caller(1)
 	detailsme := runtime.FuncForPC(pcme)
 	pc, _, _, _ := runtime.Caller(1 + t.IncludeLimit)
 	details := runtime.FuncForPC(pc)
 	return (details != nil) && detailsme.Name() == details.Name()
+}
+
+// Make a map[names]*regexp.Regexp for internal use by directives'
+// implementations.
+func (t *Gledki) makeRegexes() {
+	t.res = make(map[string]*regexp.Regexp, 2)
+	t.res = map[string]*regexp.Regexp{
+		"wrap": regexp.MustCompile(spf(
+			`(?m:(\Q%s\Ewrapper\s+([/\.\-\w]+)\Q%s\E[\r]?[\n]?))`, t.Tags[0], t.Tags[1])),
+		"include": regexp.MustCompile(
+			spf(`\Q%s\E(include\s+([/\.\-\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])),
+	}
 }
 
 // Logger is implemented by gommon/log

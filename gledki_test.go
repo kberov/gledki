@@ -1,4 +1,4 @@
-package tmpls
+package gledki
 
 import (
 	"bytes"
@@ -29,7 +29,7 @@ func init() {
 		return err
 	})
 	var lgbuf = bytes.NewBuffer([]byte(""))
-	logger = log.New("tmpls")
+	logger = log.New("gledki")
 	logger.SetOutput(lgbuf)
 	logger.SetLevel(log.DEBUG)
 	logger.SetHeader(defaultLogHeader)
@@ -42,7 +42,7 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Fatal("Error New: ", err.Error())
 	} else {
-		t.Logf("\ntmpls.New loads all files in %s", templatesDir)
+		t.Logf("\ngledki.New loads all files in %s", templatesDir)
 		for k := range tpls.files {
 			_ = k
 			//	t.Logf("file: %s", k)
@@ -69,8 +69,12 @@ func TestNew(t *testing.T) {
 }
 
 func ExampleNew() {
-	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
-	fmt.Printf(`A Tmpls object properties:
+	tpls, err := New(templatesDir, filesExt, tagsPair, false)
+	if err != nil {
+		fmt.Print("Error:", err.Error())
+		//os.Exit(1)
+	}
+	fmt.Printf(`A gledki object properties:
 	Stash: %#v
 	Ext: %#v
 	root: %s
@@ -81,33 +85,22 @@ func ExampleNew() {
 		tpls.Tags, tpls.IncludeLimit, tpls.Logger)
 
 	// Output:
-	// A Tmpls object properties:
-	//	Stash: tmpls.Stash{}
+	// A gledki object properties:
+	//	Stash: gledki.Stash{}
 	//	Ext: ".htm"
-	//	root: /home/berov/opt/dev/tmpls/testdata/tpls
+	//	root: /home/berov/opt/dev/gledki/testdata/tpls
 	//	Tags: [2]string{"${", "}"}
 	//	IncludeLimit: 3
 	//	Logger: *log.Logger from "github.com/labstack/gommon/log"
-
-	// New may return various errors
-	if _, err := New("/ala/bala", filesExt, tagsPair, false); err != nil {
-		fmt.Println(err.Error())
-	}
-
-	// Tmpls root directory '/ala/bala' does not exist!
-
 }
 
 func ExampleNew_err() {
-
 	// New may return various errors
 	if _, err := New("/ala/bala", filesExt, tagsPair, false); err != nil {
 		fmt.Println(err.Error())
 	}
-
 	// Output:
-	// Tmpls root directory '/ala/bala' does not exist!
-
+	// Gledki root directory '/ala/bala' does not exist!
 }
 
 var data = Stash{
@@ -139,7 +132,7 @@ func TestExecute(t *testing.T) {
 		"title":     "Hello",
 		"body":      "<p>A body here</p>",
 		"lang":      "en",
-		"generator": "Tmpls",
+		"generator": "Gledki",
 		"included":  "included",
 	}
 	out.Reset()
@@ -165,7 +158,7 @@ func TestExecute(t *testing.T) {
 	}
 }
 
-func ExampleTmpls_Execute_simple() {
+func ExampleGledki_Execute_simple() {
 
 	// Once on startup.
 	tpls, _ := New(templatesDir, filesExt, [2]string{"<%", "%>"}, false)
@@ -221,7 +214,7 @@ func TestAddExecuteFunc(t *testing.T) {
 	// Prepare a book for display and prepare a list of other books
 	tpls.MergeStash(map[string]any{
 		"lang":       "en",
-		"generator":  "Tmpls",
+		"generator":  "Gledki",
 		"included":   "вложена",
 		"book_title": "Историософия", "book_author": "Николай Гочев",
 		"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
@@ -253,7 +246,7 @@ func TestAddExecuteFunc(t *testing.T) {
 	// Even later, when the whole page is put together
 	_, err := tpls.Execute(os.Stdout, "book")
 	if err != nil {
-		t.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
+		t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
 	}
 }
 
@@ -261,7 +254,7 @@ func TestIncludeLimitPanic(t *testing.T) {
 	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
 	tpls.Stash = Stash{
 		"title":     "Possibly recursive inclusions",
-		"generator": "Tmpls",
+		"generator": "Gledki",
 		"included":  "included",
 	}
 	level := 0
@@ -287,7 +280,7 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 
 	tpls.Stash = Stash{
 		"title":     "Possibly recursive inclusions",
-		"generator": "Tmpls",
+		"generator": "Gledki",
 		"included":  "included",
 	}
 	level := 0
@@ -301,7 +294,7 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 	out.Reset()
 	_, err := tpls.Execute(&out, "includes")
 	if err != nil {
-		t.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
+		t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
 	}
 	outstr := out.String()
 	t.Log(outstr)
