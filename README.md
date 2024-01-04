@@ -1,7 +1,7 @@
-# tmpls
+# Gledki (Гледки)
 A templates and data manager for [fasttemplate](https://github.com/valyala/fasttemplate)
 
-Package tmpls provides a templates and data manager for
+Package gledki provides a templates and data manager for
 [https://github.com/valyala/fasttemplate].
 
 Because fasttemplate is minimalisitic, the need
@@ -15,6 +15,9 @@ fasttemplate's TagFunc allows us to keep logic into our Go code and prepare
 pieces of the output as needed. See the tests and sample templates for usage
 examples.
 
+Gledki is plural for гледка in Bulgarian, which literally means "view". So this
+package provides means to implement views.
+
 ## Note!
 This is my first module in Go, so I would be glad to get advices for
 improvements, exspecially for idiomatic Go.
@@ -23,7 +26,7 @@ improvements, exspecially for idiomatic Go.
 
 ```go
 
-import "github.com/kberov/tmpls"
+import "github.com/kberov/gledki"
 //...
 var templates = "./testdata/tpls"
 var ext = ".htm"
@@ -44,7 +47,7 @@ tpls.DataMap = DataMap{
 // Prepare a book for display and prepare a list of other books
 tpls.MergeDataMap(map[string]any{
 	"lang":       "en",
-	"generator":  "Tmpls",
+	"generator":  "Gledki",
 	"included":   "вложена",
 	"book_title": "Историософия", "book_author": "Николай Гочев",
 	"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
@@ -75,9 +78,9 @@ tpls.DataMap["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error)
 // Even later, when the whole page is put together
 _, err := tpls.Execute(os.Stdout, "book")
 if err != nil {
-	t.Fatalf("Error executing Tmpls.Execute: %s", err.Error())
+	t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
 }
 
 ```
 
-See other examples in [tmpls_test.go] and [example_test.go]
+See other examples in [gledki_test.go] and [example_test.go]
