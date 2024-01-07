@@ -37,7 +37,7 @@ var tags = [2]string{"${", "}"}
 tpls, _ := New(templates, ext, tags, false)
 tpls.Logger = logger
 
-tpls.DataMap = DataMap{
+tpls.Stash = Stash{
 	"a": "a value",
 	"b": "b value",
 }
@@ -45,7 +45,7 @@ tpls.DataMap = DataMap{
 // Later in a galaxy far away
 // ....
 // Prepare a book for display and prepare a list of other books
-tpls.MergeDataMap(map[string]any{
+tpls.MergeStash(map[string]any{
 	"lang":       "en",
 	"generator":  "Gledki",
 	"included":   "вложена",
@@ -53,7 +53,7 @@ tpls.MergeDataMap(map[string]any{
 	"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
 })
 // Prepare a function for rendering other books
-tpls.DataMap["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
+tpls.Stash["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
 	// for more complex file, containing wrapper and include directives, you
 	// must use tpls.Compile("path/to/file")
 	template, err := tpls.LoadFile("partials/_book_item")
@@ -83,4 +83,4 @@ if err != nil {
 
 ```
 
-See other examples in [gledki_test.go] and [example_test.go]
+See other examples in gledki_test.go.
