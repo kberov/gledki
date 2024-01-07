@@ -268,7 +268,7 @@ func (t *Gledki) findRoot(root string) error {
 			t.root = byCwd
 			return nil
 		} else {
-			return fmt.Errorf("Gledki root directory '%s' does not exist!", byCwd)
+			return fmt.Errorf("Gledki root directory '%s' does not exist! You have to create it. ", byCwd)
 		}
 	}
 
@@ -393,13 +393,15 @@ func (t *Gledki) makeRegexes() {
 	}
 }
 
-// Logger is implemented by gommon/log
+// Logger is implemented by gommon/log on which we depend
 type Logger interface {
 	Debug(args ...any)
 	Debugf(format string, args ...any)
 	DisableColor()
 	Error(args ...any)
 	Errorf(format string, args ...any)
+	Fatal(i ...any)
+	Fatalf(format string, args ...any)
 	Info(args ...any)
 	Infof(format string, args ...any)
 	Panic(i ...any)
