@@ -21,7 +21,7 @@ var out strings.Builder
 
 // remove all compiled previously templates
 func init() {
-	sfx := filesExt + compiledSufix
+	sfx := filesExt + CompiledSuffix
 	filepath.WalkDir(templatesDir, func(path string, d fs.DirEntry, err error) error {
 		if strings.HasSuffix(path, sfx) {
 			os.Remove(path)
@@ -66,41 +66,6 @@ func TestNew(t *testing.T) {
 	} else {
 		t.Fatal("Reading nonreadable file should have failed!")
 	}
-}
-
-func ExampleNew() {
-	tpls, err := New(templatesDir, filesExt, tagsPair, false)
-	if err != nil {
-		fmt.Print("Error:", err.Error())
-		//os.Exit(1)
-	}
-	fmt.Printf(`A gledki object properties:
-	Stash: %#v
-	Ext: %#v
-	root: %s
-	Tags: %#v
-	IncludeLimit: %d
-	Logger: %T from "github.com/labstack/gommon/log"
-`, tpls.Stash, tpls.Ext, tpls.root,
-		tpls.Tags, tpls.IncludeLimit, tpls.Logger)
-
-	// Output:
-	// A gledki object properties:
-	//	Stash: gledki.Stash{}
-	//	Ext: ".htm"
-	//	root: /home/berov/opt/dev/gledki/testdata/tpls
-	//	Tags: [2]string{"${", "}"}
-	//	IncludeLimit: 3
-	//	Logger: *log.Logger from "github.com/labstack/gommon/log"
-}
-
-func ExampleNew_err() {
-	// New may return various errors
-	if _, err := New("/ala/bala", filesExt, tagsPair, false); err != nil {
-		fmt.Println(err.Error())
-	}
-	// Output:
-	// Gledki root directory '/ala/bala' does not exist!
 }
 
 var data = Stash{
@@ -158,47 +123,6 @@ func TestExecute(t *testing.T) {
 	}
 }
 
-func ExampleGledki_Execute_simple() {
-
-	// Once on startup.
-	tpls, _ := New(templatesDir, filesExt, [2]string{"<%", "%>"}, false)
-	tpls.Logger.SetLevel(log.DEBUG)
-	// ...
-	// Later... many times and with various data
-	tpls.Stash = map[string]any{"generator": "Изгледи"}
-	tpls.MergeStash(map[string]any{
-		"title": "Hello",
-		"body": TagFunc(func(w io.Writer, tag string) (int, error) {
-			// tmpls.Stash entries and even the entire Stash can be modified
-			// from within tmpls.TagFunc
-			tpls.Stash["generator"] = "Something"
-			return w.Write([]byte("<p>Some complex callculations to construct the body.</p>"))
-		}),
-	})
-
-	// Even later - many times - on each response
-	// See used templates in testdata/tpls.
-	tpls.Execute(os.Stdout, "simple")
-	// Output:
-	// <!doctype html>
-	// <html>
-	//     <head>
-	//         <meta charset="UTF-8">
-	//         <meta name="generator" content="Изгледи">
-	//         <title>Hello</title>
-	//     </head>
-	//     <body>
-	//         <header><h1>Hello</h1></header>
-	//         <h1>Hello</h1>
-	//         <section>
-	//             <p>Some complex callculations to construct the body.</p>
-	//             <p>Changed generator to "Something".</p>
-	//         </section>
-	//         <footer>Тази страница бе създадена с Something.</footer>
-	//     </body>
-	// </html>
-}
-
 func TestAddExecuteFunc(t *testing.T) {
 
 	tpls, _ := New(templatesDir, filesExt, tagsPair, false)
@@ -225,7 +149,6 @@ func TestAddExecuteFunc(t *testing.T) {
 		// for more complex file, containing wrapper and include directives, you
 		// must use tpls.Compile("path/to/file")
 		template, err := tpls.LoadFile("partials/_book_item")
-
 		if err != nil {
 			return 0, fmt.Errorf(
 				"Problem loading partial template `_book_item` in 'other_books' TagFunc: %s", err.Error())

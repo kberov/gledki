@@ -1,17 +1,20 @@
 /*
 Package gledki provides a templates and data manager for
-[pkg/github.com/valyala/fasttemplate].
+[fasttemplate].
 
-Because [pkg/github.com/valyala/fasttemplate] is minimalisitic, the need
-for this wrapper arose. Two template directives were implemented – `wrapper`
-and `include`. These make this simple templates manager powerful enough for
-big and complex sites or generating any text output.
+Because fasttemplate is minimalisitic, the need for this wrapper arose. Two
+template directives were implemented – `wrapper` and `include`. They make
+[gledki] powerful enough for use in big and complex web applications.
 
-The main template can be compiled from several files – as many as you need –
+The main template (the one which partial path you pass as argument to
+[Gledki.Execute]) can be compiled from several files – as many as you need –
 with the simple approach of wrapping and including partial files recursively.
-fasttemplate's TagFunc allows us to keep logic into our Go code and prepare
-pieces of the output as needed. See the tests and sample templates for usage
-examples.
+[TagFunc] allows us to keep logic into our Go code and prepare pieces of the
+output as needed. Leveraging cleverly TagFunc gives us complete separation of
+concerns. This simple but powerful technic made me write this wrapper.
+Ah, and „gledki(гледки)“ means "views" in Bulgarian.
+
+See the tests and sample templates for usage examples.
 */
 package gledki
 
@@ -28,18 +31,17 @@ import (
 	"sync"
 
 	"github.com/labstack/gommon/log"
-
-	ft "github.com/valyala/fasttemplate"
+	"github.com/valyala/fasttemplate"
 )
 
-// TagFunc is an alias for fasttemplate.TagFunc
-type TagFunc = ft.TagFunc
+// TagFunc is an alias for [fasttemplate.TagFunc].
+type TagFunc = fasttemplate.TagFunc
 
 // path => slurped file content
 type filesMap map[string]string
 
-// Stash is a stash for replacement into templates. Can have the same value types, needed
-// for fasttemplate:
+// Stash is `map[string]any` for replacement into templates. It has
+// the value types' requirements for fasttemplate:
 //   - []byte - the fastest value type
 //   - string - convenient value type
 //   - TagFunc - flexible value type
@@ -71,9 +73,15 @@ type Gledki struct {
 }
 
 const defaultLogHeader = `${prefix}:${time_rfc3339}:${level}:${short_file}:${line}`
-const compiledSufix = "c"
+
+// CompiledSuffix is appended to the extension of compiled templates.
+var CompiledSuffix = "c"
 
 var spf = fmt.Sprintf
+
+// CacheTemplates can be set to false to disable caching of compiled templates
+// both in memory and on disk during development.
+var CacheTemplates bool = true
 
 // New instantiates a new [Gledki] struct and returns it. Prepares [Stash] and
 // loads all template files from disk under the given `root` if `loadFiles` is
@@ -104,27 +112,29 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Gledki, erro
 	return t, nil
 }
 
-// Compile composes a template and returns its content or an error. This means:
-//   - The file is loaded from disk using [Gledki.LoadFile] for use by
-//     [Gledki.Execute].
-//   - if the template contains `${wrapper some/file}`, the wrapper file is
-//     wrapped around it.
-//   - if the template contains any `${include some/file}` the files are
-//     loaded, wrapped (if there is a wrapper directive in them) and included
-//     at these places without rendering any placeholders. The inclusion
-//     is done recursively. See *Gledki.IncludeLimit.
-//   - The compiled template is stored in a private map[filename(string)]string,
-//     attached to *Gledki for subsequent use during the same run of the
-//     application. The content of the compiled template is stored on disk with
-//     a sufix (currently "c"), attached to the extension of the file in the
-//     same directory where the template file resides. The storing of the
-//     compiled file is done concurently in a goroutine while being executed.
-//   - On the next run of the application the compiled file is simply loaded
-//     and its content retuned. All the steps above are skipped.
-//
-// Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
-// included files you may need to set a bigger integer. This method is suitable
-// for use in a ft.TagFunc to compile parts to be replaced in bigger templates.
+/*
+Compile composes a template and returns its content or an error. This means:
+  - The file is loaded from disk using [Gledki.LoadFile] for use by
+    [Gledki.Execute].
+  - if the template contains `${wrapper some/file}`, the wrapper file is
+    wrapped around it.
+  - if the template contains any `${include some/file}` the files are
+    loaded, wrapped (if there is a wrapper directive in them) and included
+    at these places without rendering any placeholders. The inclusion
+    is done recursively. See Gledki.IncludeLimit.
+  - The compiled template is stored in a private map[filename(string)]string,
+    attached to *Gledki for subsequent use during the same run of the
+    application. The content of the compiled template is stored on disk with a
+    suffix (see [CompiledSuffix]), attached to the extension of the file in the
+    same directory where the template file resides. The storing of the compiled
+    file is done concurently in a goroutine while being executed.
+  - On the next run of the application the compiled file is simply loaded
+    and its content retuned. All the steps above are skipped.
+
+Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
+included files you may need to set a bigger integer. This method is suitable
+for use in a ft.TagFunc to compile parts to be replaced in bigger templates.
+*/
 func (t *Gledki) Compile(path string) (string, error) {
 	path = t.toFullPath(path)
 	if text, e := t.loadCompiled(path); e == nil {
@@ -142,10 +152,12 @@ func (t *Gledki) Compile(path string) (string, error) {
 	if text, err = t.include(text); err != nil {
 		return text, err
 	}
-	t.compiled[path] = text
-	t.wg.Add(1)
-	go t.storeCompiled(path, t.compiled[path])
-	return t.compiled[path], nil
+	if CacheTemplates {
+		t.compiled[path] = text
+		t.wg.Add(1)
+		go t.storeCompiled(path, t.compiled[path])
+	}
+	return text, nil
 }
 
 func (t *Gledki) loadCompiled(fullPath string) (string, error) {
@@ -153,7 +165,7 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 		return text, nil
 	}
 	t.Logger.Debugf("loadCompiled('%s')", fullPath)
-	fullPath = fullPath + compiledSufix
+	fullPath = fullPath + CompiledSuffix
 	if fileIsReadable(fullPath) {
 		data, _ := os.ReadFile(fullPath)
 		t.compiled[fullPath] = string(data)
@@ -165,16 +177,16 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 func (t *Gledki) storeCompiled(fullPath, text string) {
 	defer t.wg.Done()
 	t.Logger.Debugf("storeCompiled('%s')", fullPath)
-	err := os.WriteFile(fullPath+compiledSufix, []byte(text), 0600)
+	err := os.WriteFile(fullPath+CompiledSuffix, []byte(text), 0600)
 	if err != nil {
 		t.Logger.Panic(err)
 	}
 }
 
-var ftExec = ft.Execute
+var ftExec = fasttemplate.Execute
 
 // Execute compiles (if needed) and executes the passed template using
-// fasttemplate.Execute. The path is resolved by prefixing the root folder
+// [fasttemplate.Execute]. The path is resolved by prefixing the root folder
 // and attaching the extension, passed to [New], if the passed file is only a
 // base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
 func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
@@ -187,19 +199,19 @@ func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 	return length, err
 }
 
-// FtExecStd is a wrapper for fasttemplate.ExecuteStd(). Useful for preparing
+// FtExecStd is a wrapper around [fasttemplate.ExecuteStd]. Useful for preparing
 // partial templates which will be later included in the main template, because
 // it keeps unknown placeholders untouched.
-func (t *Gledki) FtExecStd(tmpl string, w io.Writer, data map[string]any) (int64, error) {
-	return ft.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
+func (t *Gledki) FtExecStd(tmpl string, w io.Writer, data Stash) (int64, error) {
+	return fasttemplate.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
 }
 
-// FtExecStringStd is a wrapper for fasttemplate.ExecuteStringStd(). Useful for
+// FtExecStringStd is a wrapper for [fasttemplate.ExecuteStringStd]. Useful for
 // preparing partial templates which will be later included in the main
 // template, because it keeps unknown placeholders untouched. It can be used
 // as a drop-in replacement for strings.Replacer
-func (t *Gledki) FtExecStringStd(template string, m map[string]any) string {
-	return ft.ExecuteStringStd(template, t.Tags[0], t.Tags[1], m)
+func (t *Gledki) FtExecStringStd(template string, data Stash) string {
+	return fasttemplate.ExecuteStringStd(template, t.Tags[0], t.Tags[1], data)
 }
 
 func (t *Gledki) loadFiles() error {
@@ -214,7 +226,7 @@ func (t *Gledki) loadFiles() error {
 }
 
 // LoadFile is used to load a template from disk or from cache, if already
-// loaded before.  Returns the template text or error if template cannot be
+// loaded before. Returns the template text or error if template cannot be
 // loaded.
 func (t *Gledki) LoadFile(path string) (string, error) {
 	path = t.toFullPath(path)
@@ -242,8 +254,8 @@ func (t *Gledki) toFullPath(path string) string {
 	return path
 }
 
-// MergeStash adds entries into the data map, used by
-// fasttemplate.Execute(...) in [Gledki.Execute]. If entries with the same key
+// MergeStash adds entries into the [Stash], used by
+// [fasttemplate.Execute] in [Gledki.Execute]. If entries with the same key
 // exist, they will be overriden with the new values.
 func (t *Gledki) MergeStash(data Stash) {
 	for k, v := range data {
@@ -268,7 +280,7 @@ func (t *Gledki) findRoot(root string) error {
 			t.root = byCwd
 			return nil
 		} else {
-			return fmt.Errorf("Gledki root directory '%s' does not exist! You have to create it. ", byCwd)
+			return fmt.Errorf("gledki root directory '%s' does not exist! You have to create it. ", byCwd)
 		}
 	}
 
@@ -393,7 +405,7 @@ func (t *Gledki) makeRegexes() {
 	}
 }
 
-// Logger is implemented by gommon/log on which we depend
+// Logger is implemented by gommon/log on which we depend.
 type Logger interface {
 	Debug(args ...any)
 	Debugf(format string, args ...any)

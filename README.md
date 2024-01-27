@@ -1,22 +1,19 @@
 # Gledki (Гледки)
-A templates and data manager for [fasttemplate](https://github.com/valyala/fasttemplate)
+Package gledki provides a templates and data manager for [fasttemplate](https://github.com/valyala/fasttemplate)
 
-Package gledki provides a templates and data manager for
-[https://github.com/valyala/fasttemplate].
+Because fasttemplate is minimalisitic, the need for this wrapper arose. Two
+template directives were implemented – `wrapper` and `include`. They make
+`gledki` powerful enough for use in big and complex web applications.
 
-Because fasttemplate is minimalisitic, the need
-for this wrapper arose. Two template directives were implemented – `wrapper`
-and `include`. These make this simple templates manager powerful enough for
-big and complex sites or generating any text output.
+The main template (the one which partial path you pass as argument to
+`Gledki.Execute(...)`) can be compiled from several files – as many as you need –
+with the simple approach of wrapping and including partial files recursively.
+`TagFunc(...)` allows us to keep logic into our Go code and prepare pieces of the
+output as needed. Leveraging cleverly TagFunc gives us complete separation of
+concerns. This simple but powerful technic made me write this wrapper.
+Ah, and „gledki(гледки)“ means "views" in Bulgarian.
 
-The main template can be compiled from several files – as many as you need –
-with the simple approach of wrapping and including files recursively.
-fasttemplate's TagFunc allows us to keep logic into our Go code and prepare
-pieces of the output as needed. See the tests and sample templates for usage
-examples.
-
-Gledki is plural for гледка in Bulgarian, which literally means "view". So this
-package provides means to implement views.
+See the tests and sample templates for usage examples.
 
 ## Note!
 This is my first module in Go, so I would be glad to get advices for
@@ -26,61 +23,64 @@ improvements, exspecially for idiomatic Go.
 
 ```go
 
-import "github.com/kberov/gledki"
-//...
-var templates = "./testdata/tpls"
-var ext = ".htm"
+import (
+	"fmt"
+	"io"
+	"os"
+
+	gl "github.com/kberov/gledki"
+	"github.com/labstack/gommon/log"
+)
+
+var templatesRootDir = "testdata/tpls"
+var filesExt = ".htm"
 var logger *log.Logger
-var tags = [2]string{"${", "}"}
+
 //...
-// Instantiate the templates manager.
-tpls, _ := New(templates, ext, tags, false)
-tpls.Logger = logger
 
-tpls.Stash = Stash{
-	"a": "a value",
-	"b": "b value",
-}
-// ...
-// Later in a galaxy far away
-// ....
-// Prepare a book for display and prepare a list of other books
-tpls.MergeStash(map[string]any{
-	"lang":       "en",
-	"generator":  "Gledki",
-	"included":   "вложена",
-	"book_title": "Историософия", "book_author": "Николай Гочев",
-	"book_isbn": "9786199169056", "book_issuer": "Студио Беров",
-})
-// Prepare a function for rendering other books
-tpls.Stash["other_books"] = TagFunc(func(w io.Writer, tag string) (int, error) {
-	// for more complex file, containing wrapper and include directives, you
-	// must use tpls.Compile("path/to/file")
-	template, err := tpls.LoadFile("partials/_book_item")
-
-	if err != nil {
-		return 0, fmt.Errorf(
-			"Problem loading partial template `_book_item` in 'other_books' TagFunc: %s", err.Error())
-	}
-	booksBB := bytes.NewBuffer([]byte(""))
-	booksFromDataBase := []map[string]any{
-		{"book_title": "Лечителката и рунтавата ѝ… котка", "book_author": "Контадин Кременски"},
-		{"book_title": "На пост", "book_author": "Николай Фенерски"},
-	}
-	for _, book := range booksFromDataBase {
-		if _, err := tpls.FtExecStd(template, booksBB, book); err != nil {
-			return 0, fmt.Errorf("Problem rendering partial template `_book_item` in 'other_books' TagFunc: %s", err.Error())
-		}
-	}
-	return w.Write(booksBB.Bytes())
-})
-
-// Even later, when the whole page is put together
-_, err := tpls.Execute(os.Stdout, "book")
+// Once on startup.
+tpls, err := gl.New(templatesRootDir, filesExt, [2]string{"<%", "%>"}, false)
 if err != nil {
-	t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
+	fmt.Print("Error:", err.Error())
+	os.Exit(1)
 }
+tpls.Logger.SetLevel(log.DEBUG)
+// …
+// Later… many times and with various data (string, []byte, gledki.TagFunc)
+tpls.Stash = map[string]any{"generator": "Гледки"}
 
+// Somwhere else in your program…
+tpls.MergeStash(gl.Stash{
+	"title": "Hello",
+	"body": gl.TagFunc(func(w io.Writer, tag string) (int, error) {
+		// tmpls.Stash entries and even the entire Stash can be modified
+		// from within tmpls.TagFunc
+		tpls.Stash["generator"] = "Something"
+		return w.Write([]byte("<p>Some complex callculations to construct the body.</p>"))
+	}),
+})
+
+// Even later…
+// See used templates in testdata/tpls.
+tpls.Execute(os.Stdout, "simple")
+// Output:
+// <!doctype html>
+// <html>
+//     <head>
+//         <meta charset="UTF-8">
+//         <meta name="generator" content="Гледки">
+//         <title>Hello</title>
+//     </head>
+//     <body>
+//         <header><h1>Hello</h1></header>
+//         <h1>Hello</h1>
+//         <section>
+//             <p>Some complex callculations to construct the body.</p>
+//             <p>Changed generator to "Something".</p>
+//         </section>
+//         <footer>Тази страница бе създадена с Something.</footer>
+//     </body>
+// </html>
 ```
 
 See other examples in gledki_test.go.
