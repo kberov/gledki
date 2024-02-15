@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/gommon/log"
 )
 
-var templatesRootDir = "testdata/tpls"
+var Roots = []string{"testdata/tpls"}
 var filesExt = ".htm"
 var logger *log.Logger
 var tagsPair = [2]string{"${", "}"}
@@ -17,7 +17,7 @@ var tagsPair = [2]string{"${", "}"}
 //var out strings.Builder
 
 func Example_New() {
-	tpls, err := gl.New(templatesRootDir, filesExt, tagsPair, false)
+	tpls, err := gl.New(Roots, filesExt, tagsPair, false)
 	if err != nil {
 		fmt.Print("Error:", err.Error())
 		os.Exit(1)
@@ -41,7 +41,7 @@ func Example_New() {
 
 func Example_New_err() {
 	// New may return various errors
-	if _, err := gl.New("/ala/bala", filesExt, tagsPair, false); err != nil {
+	if _, err := gl.New([]string{"/ala/bala"}, filesExt, tagsPair, false); err != nil {
 		fmt.Println(err.Error())
 	}
 	// Output:
@@ -51,10 +51,10 @@ func Example_New_err() {
 func ExampleGledki_Execute_simple() {
 
 	// Once on startup.
-	tpls, err := gl.New(templatesRootDir, filesExt, [2]string{"<%", "%>"}, false)
+	tpls, err := gl.New(Roots, filesExt, [2]string{"<%", "%>"}, false)
 	if err != nil {
 		fmt.Print("Error:", err.Error())
-		//os.Exit(1)
+		os.Exit(1)
 	}
 	tpls.Logger.SetLevel(log.DEBUG)
 	// …

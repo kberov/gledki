@@ -11,7 +11,10 @@ The main template (the one which partial path you pass as argument to
 with the simple approach of wrapping and including partial files recursively.
 [TagFunc] allows us to keep logic into our Go code and prepare pieces of the
 output as needed. Leveraging cleverly TagFunc gives us complete separation of
-concerns. This simple but powerful technic made me write this wrapper.
+concerns. In TagFunc we can invoke [Gledki.Compile] to preprare partial
+templates, make any calculatuons and prepare the output for replacement in the
+main template. No need to learn a new template language. The possibilities of
+his simple but powerful technique ispired me to write this wrapper.
 Ah, and „gledki(гледки)“ means "views" in Bulgarian.
 
 See the tests and sample templates for usage examples.
@@ -57,14 +60,17 @@ type Gledki struct {
 	compiled filesMap
 	// File extension of the templates, for example: ".htm".
 	Ext string
-	// Root folder, where template files reside, fo example "./templates"
-	root string
+	// Root folders, where template files reside, for example
+	// ["./templates","example.com","themeX"]. They will be wallked up in the
+	// order they are provided to find the template file, passed to
+	// [Gledki.Execute]. The first found is used.
+	Roots []string
 	// Pair of Tags, for example:  "${", "}".
 	Tags [2]string
 	// How deeply files can be included into each other.
 	// Default: 3 starting from 0 in the main template.
 	IncludeLimit int
-	// To wait for storeCompiled() to finish.
+	// To wait while the compiled template is being stored.
 	wg sync.WaitGroup
 	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
 	Logger
@@ -83,11 +89,13 @@ var spf = fmt.Sprintf
 // both in memory and on disk during development.
 var CacheTemplates bool = true
 
-// New instantiates a new [Gledki] struct and returns it. Prepares [Stash] and
-// loads all template files from disk under the given `root` if `loadFiles` is
-// true. Otherwise postpones the loading of the needed file until
-// [Gledki.Compile] is invoked automatically in [Gledki.Execute].
-func New(root string, ext string, tags [2]string, loadFiles bool) (*Gledki, error) {
+/*
+New instantiates a new [Gledki] struct and returns a reference to it. Prepares
+[Stash] and loads all template files from disk under the given `roots` if
+`loadFiles` is true. Otherwise postpones the loading of the needed file until
+[Gledki.Compile] is invoked automatically in [Gledki.Execute].
+*/
+func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, error) {
 	t := &Gledki{
 		Stash:        make(Stash, 5),
 		compiled:     make(filesMap, 5),
@@ -97,7 +105,7 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Gledki, erro
 		IncludeLimit: 3,
 		Logger:       log.New("gledki"),
 	}
-	if err := t.findRoot(root); err != nil {
+	if err := t.findRoots(roots); err != nil {
 		return nil, err
 	}
 	t.Logger.SetOutput(os.Stderr)
@@ -112,12 +120,22 @@ func New(root string, ext string, tags [2]string, loadFiles bool) (*Gledki, erro
 	return t, nil
 }
 
+// Must is a convenient wrapper for [New], which returns only &Gledki or panics
+// in case of any error.
+func Must(roots []string, ext string, tags [2]string, loadFiles bool) *Gledki {
+	gl, err := New(roots, ext, tags, loadFiles)
+	if err != nil {
+		panic(err.Error())
+	}
+	return gl
+}
+
 /*
 Compile composes a template and returns its content or an error. This means:
   - The file is loaded from disk using [Gledki.LoadFile] for use by
     [Gledki.Execute].
   - if the template contains `${wrapper some/file}`, the wrapper file is
-    wrapped around it.
+    wrapped around it. Only one `wrapper` directive is allowed per file.
   - if the template contains any `${include some/file}` the files are
     loaded, wrapped (if there is a wrapper directive in them) and included
     at these places without rendering any placeholders. The inclusion
@@ -133,7 +151,8 @@ Compile composes a template and returns its content or an error. This means:
 
 Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
 included files you may need to set a bigger integer. This method is suitable
-for use in a ft.TagFunc to compile parts to be replaced in bigger templates.
+for use in a ft.TagFunc to preprare parts of the output to be replaced in the
+main template.
 */
 func (t *Gledki) Compile(path string) (string, error) {
 	path = t.toFullPath(path)
@@ -215,14 +234,19 @@ func (t *Gledki) FtExecStringStd(template string, data Stash) string {
 }
 
 func (t *Gledki) loadFiles() error {
-	return filepath.WalkDir(t.root, func(path string, d fs.DirEntry, err error) error {
-		if strings.HasSuffix(path, t.Ext) {
-			if _, err = t.LoadFile(path); err != nil {
-				return err
+	for _, root := range t.Roots {
+		if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if strings.HasSuffix(path, t.Ext) {
+				if _, err = t.LoadFile(path); err != nil {
+					return err
+				}
 			}
+			return err
+		}); err != nil {
+			return err
 		}
-		return err
-	})
+	}
+	return nil
 }
 
 // LoadFile is used to load a template from disk or from cache, if already
@@ -234,22 +258,41 @@ func (t *Gledki) LoadFile(path string) (string, error) {
 		return text, nil
 	}
 	if fileIsReadable(path) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
+		data, _ := os.ReadFile(path)
 		t.files[path] = string(data)
 		return t.files[path], nil
 	}
-	return "", errors.New(spf("File '%s' could not be read!", path))
+	return "", fmt.Errorf(`file '%s' could not be read!`, path)
 }
 
+/*
+MustLoadFile does the same as [Gledki.LoadFile], but panics in case the
+template file cannot be loaded.
+*/
+func (t *Gledki) MustLoadFile(path string) string {
+	partial, err := t.LoadFile(path)
+	if err != nil {
+		t.Logger.Panic(err)
+	}
+	return partial
+}
+
+// If the template is without extension, appends it. Then finds the first
+// matching file in the range of include paths and returns it.
 func (t *Gledki) toFullPath(path string) string {
 	if !strings.HasSuffix(path, t.Ext) {
 		path = path + t.Ext
 	}
-	if !strings.HasPrefix(path, t.root) {
-		path = filepath.Join(t.root, path)
+	for _, root := range t.Roots {
+		foundPath := path
+		if !strings.HasPrefix(path, root) {
+			foundPath = filepath.Join(root, path)
+		}
+		if fileIsReadable(foundPath) {
+			return foundPath
+		} else {
+			continue
+		}
 	}
 	return path
 }
@@ -263,33 +306,36 @@ func (t *Gledki) MergeStash(data Stash) {
 	}
 }
 
-// Tries to return an existing absolute path to the given root path. If the
-// provided root is relative, the function expects the root to be relative to
-// the Executable file or to the current working directory. If the root does
-// not exist, this function returns an error.
-func (t *Gledki) findRoot(root string) error {
-	if !filepath.IsAbs(root) {
-		byExe := filepath.Join(findBinDir(), root)
-		if dirExists(byExe) {
-			t.root = byExe
-			return nil
+// Tries to find existing absolute paths given the root paths. If the
+// provided roots are relative, the function expects the roots to be relative to
+// the Executable file or to the current working directory. If some of the
+// roots does not exist, this function returns an error.
+func (t *Gledki) findRoots(roots []string) error {
+	for _, root := range roots {
+		if !filepath.IsAbs(root) {
+			byExe := filepath.Join(findBinDir(), root)
+			if dirExists(byExe) {
+				t.Roots = append(t.Roots, byExe)
+				continue
+			}
+			// Now try by CWD
+			byCwd, _ := filepath.Abs(root)
+			if dirExists(byCwd) {
+				t.Roots = append(t.Roots, byCwd)
+				continue
+			} else {
+				return fmt.Errorf("gledki root directory '%s' does not exist! You have to create it. ", byCwd)
+			}
 		}
-		// Now try by CWD
-		byCwd, _ := filepath.Abs(root)
-		if dirExists(byCwd) {
-			t.root = byCwd
-			return nil
-		} else {
-			return fmt.Errorf("gledki root directory '%s' does not exist! You have to create it. ", byCwd)
-		}
-	}
 
-	if dirExists(root) {
-		t.root = root
-		return nil
-	} else {
-		return fmt.Errorf("Gledki root directory '%s' does not exist!", root)
+		if dirExists(root) {
+			t.Roots = append(t.Roots, root)
+			continue
+		} else {
+			return fmt.Errorf("Gledki root directory '%s' does not exist!", root)
+		}
 	}
+	return nil
 }
 
 func dirExists(path string) bool {
@@ -329,7 +375,7 @@ func (t *Gledki) include(text string) (string, error) {
 	howMany := len(matches)
 	if howMany > 0 {
 		t.Logger.Debugf("include: %#v", matches)
-		stash := make(map[string]any, howMany)
+		stash := make(Stash, howMany)
 		for _, m := range matches {
 			if t.detectInludeRecursionLimit() {
 				t.Logger.Panicf("Limit of %d nested inclusions reached"+
@@ -350,7 +396,8 @@ func (t *Gledki) include(text string) (string, error) {
 				return "", err
 			}
 		}
-		// Keep unknown placeholders for the main Execute!
+		// Replace ${include file/name.ext} with file content, but keep
+		// placeholders for the main Execute!
 		return t.FtExecStringStd(text, stash), nil
 	}
 	return text, nil
