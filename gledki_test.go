@@ -280,6 +280,15 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 	}
 }
 
+func TestFtExecString(t *testing.T) {
+	tpls, _ := New(includePaths, filesExt, tagsPair, false)
+	partial := `<div class="pager">${prev}${next}</div>`
+	out := tpls.FtExecString(partial, Stash{`prev`: `previous`})
+	if strings.Contains(out, "next") {
+		t.Fatal("String should not contain unused placeholder 'next'!")
+	}
+}
+
 func TestErrors(t *testing.T) {
 
 	if _, err := New([]string{"/ala/bala/nica"}, filesExt, tagsPair, false); err != nil {

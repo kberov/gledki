@@ -159,7 +159,7 @@ func (t *Gledki) Compile(path string) (string, error) {
 	if text, e := t.loadCompiled(path); e == nil {
 		return text, nil
 	}
-	t.Logger.Debugf("Compile('%s')", path)
+	// t.Logger.Debugf("Compile('%s')", path)
 	text, err := t.LoadFile(path)
 	if err != nil {
 		return "", err
@@ -183,7 +183,7 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 	if text, ok := t.compiled[fullPath]; ok {
 		return text, nil
 	}
-	t.Logger.Debugf("loadCompiled('%s')", fullPath)
+	// t.Logger.Debugf("loadCompiled('%s')", fullPath)
 	fullPath = fullPath + CompiledSuffix
 	if fileIsReadable(fullPath) {
 		data, _ := os.ReadFile(fullPath)
@@ -195,7 +195,7 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 
 func (t *Gledki) storeCompiled(fullPath, text string) {
 	defer t.wg.Done()
-	t.Logger.Debugf("storeCompiled('%s')", fullPath)
+	// t.Logger.Debugf("storeCompiled('%s')", fullPath)
 	err := os.WriteFile(fullPath+CompiledSuffix, []byte(text), 0600)
 	if err != nil {
 		t.Logger.Panic(err)
@@ -223,6 +223,13 @@ func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 // it keeps unknown placeholders untouched.
 func (t *Gledki) FtExecStd(tmpl string, w io.Writer, data Stash) (int64, error) {
 	return fasttemplate.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
+}
+
+// FtExecString is a wrapper for [fasttemplate.ExecuteString]. Useful for
+// preparing partial templates which will be later included in the main
+// template. It does not keep unknown tags.
+func (t *Gledki) FtExecString(template string, data Stash) string {
+	return fasttemplate.ExecuteString(template, t.Tags[0], t.Tags[1], data)
 }
 
 // FtExecStringStd is a wrapper for [fasttemplate.ExecuteStringStd]. Useful for
@@ -374,7 +381,7 @@ func (t *Gledki) include(text string) (string, error) {
 	matches := re.FindAllStringSubmatch(text, -1)
 	howMany := len(matches)
 	if howMany > 0 {
-		t.Logger.Debugf("include: %#v", matches)
+		// t.Logger.Debugf("include: %#v", matches)
 		stash := make(Stash, howMany)
 		for _, m := range matches {
 			if t.detectInludeRecursionLimit() {
@@ -414,7 +421,7 @@ func (t *Gledki) wrap(text string) (string, error) {
 	// allow only one wrapper
 	match := re.FindStringSubmatch(text)
 	if len(match) > 0 {
-		t.Logger.Debugf("wrapper: %#v", match)
+		// t.Logger.Debugf("wrapper: %#v", match)
 		wrapperFile, err := t.LoadFile(string(match[2]))
 		if err != nil {
 			return "", err
