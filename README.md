@@ -32,14 +32,15 @@ import (
 	"github.com/labstack/gommon/log"
 )
 
-var templatesRootDir = "testdata/tpls"
+// Multiple templates paths. The first found template with a certain name is
+// loaded. Convenient for themes, multidomain sites etc.
+var templatesRoots = []string{"./testdata/tpls/theme","./testdata/tpls" }
 var filesExt = ".htm"
-var logger *log.Logger
 
 //...
 
 // Once on startup.
-tpls, err := gl.New(templatesRootDir, filesExt, [2]string{"<%", "%>"}, false)
+tpls, err := gl.New(templatesRoots, filesExt, [2]string{"<%", "%>"}, false)
 if err != nil {
 	fmt.Print("Error:", err.Error())
 	os.Exit(1)

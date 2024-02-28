@@ -181,7 +181,8 @@ func TestAddExecuteFunc(t *testing.T) {
 	}
 }
 
-// We put the second path as first, so files in it will be found first, if they exist.
+// We put the second path as first, so files in it will be found first, if they
+// exist. The test is successful if the "black" theme files are used.
 func TestAddExecuteFuncWithTheme(t *testing.T) {
 	roots := []string{includePaths[1], includePaths[0]}
 	tpls, _ := New(roots, filesExt, tagsPair, false)
