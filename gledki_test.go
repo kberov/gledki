@@ -295,9 +295,9 @@ func TestErrors(t *testing.T) {
 	if _, err := New([]string{"/ala/bala/nica"}, filesExt, tagsPair, false); err != nil {
 		errstr := err.Error()
 		if strings.Contains(errstr, "does not exist") {
-			t.Logf("Right error: %s", err.Error())
+			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error: errstr")
+			t.Fatalf("Wrong error: %s", errstr)
 		}
 	} else {
 		t.Fatal("No error - this is unexpected!")
@@ -307,10 +307,10 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "no_wrapper"); err != nil {
 		errstr := err.Error()
-		if strings.Contains(errstr, "could not be read") {
-			t.Logf("Right error: %s", err.Error())
+		if strings.Contains(errstr, "no such file or") {
+			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error: errstr")
+			t.Fatalf(`Wrong error: %s`, errstr)
 		}
 	} else {
 		t.Fatal("No error - this is unexpected!")
@@ -319,10 +319,10 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "nosuchfile"); err != nil {
 		errstr := err.Error()
-		if strings.Contains(errstr, "could not be read") {
-			t.Logf("Right error: %s", err.Error())
+		if strings.Contains(errstr, "no such file or") {
+			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error: errstr")
+			t.Fatalf("Wrong error: %s", errstr)
 		}
 	} else {
 		t.Fatal("No error - this is unexpected!")
@@ -331,10 +331,10 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "no_include"); err != nil {
 		errstr := err.Error()
-		if strings.Contains(errstr, "could not be read") {
-			t.Logf("Right error: %s", err.Error())
+		if strings.Contains(errstr, "no such file or") {
+			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error:%s", errstr)
+			t.Fatalf("Wrong error: %s", errstr)
 		}
 	} else {
 		t.Fatalf("No error - this is unexpected! Output: %s", out.String())
@@ -342,10 +342,10 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "incl_no_wrapper.htm"); err != nil {
 		errstr := err.Error()
-		if strings.Contains(errstr, "could not be read") {
-			t.Logf("Right error: %s", err.Error())
+		if strings.Contains(errstr, "no such file or") {
+			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error:%s", errstr)
+			t.Fatalf("Wrong error: %s", errstr)
 		}
 	} else {
 		t.Fatalf("No error - this is unexpected! Output: %s", out.String())
@@ -354,8 +354,8 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "incl_no_include.htm"); err != nil {
 		errstr := err.Error()
-		if strings.Contains(errstr, "could not be read") {
-			t.Logf("Right error: %s", err.Error())
+		if strings.Contains(errstr, "no such file or") {
+			t.Logf("Right error: %s", errstr)
 		} else {
 			t.Fatalf("Wrong error:%s", errstr)
 		}
