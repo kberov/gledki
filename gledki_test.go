@@ -2,6 +2,7 @@ package gledki
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -293,11 +294,10 @@ func TestFtExecString(t *testing.T) {
 func TestErrors(t *testing.T) {
 
 	if _, err := New([]string{"/ala/bala/nica"}, filesExt, tagsPair, false); err != nil {
-		errstr := err.Error()
-		if strings.Contains(errstr, "does not exist") {
-			t.Logf("Right error: %s", errstr)
+		if errors.Is(err, os.ErrNotExist) {
+			t.Logf("Right error: %v", err)
 		} else {
-			t.Fatalf("Wrong error: %s", errstr)
+			t.Fatalf("Wrong error: %v", err)
 		}
 	} else {
 		t.Fatal("No error - this is unexpected!")
