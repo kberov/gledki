@@ -185,7 +185,7 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 	}
 	// t.Logger.Debugf("loadCompiled('%s')", fullPath)
 	fullPath = fullPath + CompiledSuffix
-	if fileIsReadable(fullPath) {
+	if isReadable(fullPath) {
 		data, _ := os.ReadFile(fullPath)
 		t.compiled[fullPath] = string(data)
 		return t.compiled[fullPath], nil
@@ -264,7 +264,7 @@ func (t *Gledki) LoadFile(path string) (string, error) {
 	if text, ok := t.files[path]; ok && len(text) > 0 {
 		return text, nil
 	}
-	if fileIsReadable(path) {
+	if isReadable(path) {
 		data, _ := os.ReadFile(path)
 		t.files[path] = string(data)
 		return t.files[path], nil
@@ -295,7 +295,7 @@ func (t *Gledki) toFullPath(path string) string {
 		if !strings.HasPrefix(path, root) {
 			foundPath = filepath.Join(root, path)
 		}
-		if fileIsReadable(foundPath) {
+		if isReadable(foundPath) {
 			return foundPath
 		} else {
 			continue
@@ -353,15 +353,13 @@ func dirExists(path string) bool {
 	return true
 }
 
-func fileIsReadable(path string) bool {
-	finfo, err := os.Stat(path)
-	if err != nil && errors.Is(err, os.ErrNotExist) {
+func isReadable(path string) bool {
+	fh, err := os.Open(path)
+	if err != nil {
 		return false
 	}
-	if finfo.Mode().IsRegular() && finfo.Mode().Perm()&0400 == 0400 {
-		return true
-	}
-	return false
+	_ = fh.Close()
+	return true
 }
 
 func findBinDir() string {
