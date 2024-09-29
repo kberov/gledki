@@ -184,13 +184,12 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 		return text, nil
 	}
 	// t.Logger.Debugf("loadCompiled('%s')", fullPath)
-	fullPath = fullPath + CompiledSuffix
-	if isReadable(fullPath) {
-		data, _ := os.ReadFile(fullPath)
-		t.compiled[fullPath] = string(data)
-		return t.compiled[fullPath], nil
+	data, err := os.ReadFile(fullPath + CompiledSuffix)
+	if err != nil {
+		return "", fmt.Errorf("compiled file: %v", err)
 	}
-	return "", errors.New(spf("File '%s' could not be read!", fullPath))
+	t.compiled[fullPath] = string(data)
+	return t.compiled[fullPath], nil
 }
 
 func (t *Gledki) storeCompiled(fullPath, text string) {
@@ -264,12 +263,12 @@ func (t *Gledki) LoadFile(path string) (string, error) {
 	if text, ok := t.files[path]; ok && len(text) > 0 {
 		return text, nil
 	}
-	if isReadable(path) {
-		data, _ := os.ReadFile(path)
-		t.files[path] = string(data)
-		return t.files[path], nil
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf(`file '%s' could not be read!`, path)
+	t.files[path] = string(data)
+	return t.files[path], nil
 }
 
 /*
