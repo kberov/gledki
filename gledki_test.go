@@ -43,7 +43,7 @@ func TestNew(t *testing.T) {
 	// load templates
 	tpls, err := New(includePaths, filesExt, tagsPair, true)
 	if err != nil {
-		t.Fatal("Error New: ", err.Error())
+		t.Error("Error New: ", err.Error())
 	} else {
 		tpls.Logger = logger
 		t.Logf("\ngledki.New loads all files in %s", includePaths)
@@ -56,10 +56,10 @@ func TestNew(t *testing.T) {
 	tpls, err = New(includePaths, filesExt, tagsPair, false)
 	tpls.Logger = logger
 	if err != nil {
-		t.Fatal("Eror New: ", err.Error())
+		t.Error("Eror New: ", err.Error())
 	}
 	if len(tpls.files) > 0 {
-		t.Fatal("templates should not be loaded")
+		t.Error("templates should not be loaded")
 	}
 	//Try to load nonreadable templates
 	os.Chmod(includePaths[0]+"/../tpls_bad/_noread.htm", 0300)
@@ -68,7 +68,7 @@ func TestNew(t *testing.T) {
 		t.Logf("Expected error from New: %s", err.Error())
 		os.Chmod(includePaths[0]+"/../tpls_bad/_noread.htm", 0400)
 	} else {
-		t.Fatal("Reading nonreadable file should have failed!")
+		t.Error("Reading nonreadable file should have failed!")
 	}
 }
 
@@ -90,7 +90,7 @@ func TestExecute(t *testing.T) {
 	t.Log(outstr)
 	for k, v := range data {
 		if !strings.Contains(outstr, v.(string)) {
-			t.Fatalf("output does not contain expected value for '%s': %s", k, v)
+			t.Errorf("output does not contain expected value for '%s': %s", k, v)
 		}
 	}
 
@@ -110,7 +110,7 @@ func TestExecute(t *testing.T) {
 	t.Log(outstr)
 	for k, v := range tpls.Stash {
 		if !strings.Contains(outstr, v.(string)) {
-			t.Fatalf("output does not contain expected value for '%s': %s", k, v)
+			t.Errorf("output does not contain expected value for '%s': %s", k, v)
 		}
 	}
 
@@ -122,7 +122,7 @@ func TestExecute(t *testing.T) {
 	t.Log(outstr)
 	for k, v := range tpls.Stash {
 		if !strings.Contains(outstr, v.(string)) {
-			t.Fatalf("output does not contain expected value for '%s': %s", k, v)
+			t.Errorf("output does not contain expected value for '%s': %s", k, v)
 		}
 	}
 }
@@ -174,12 +174,12 @@ func TestAddExecuteFunc(t *testing.T) {
 	// Even later, when the whole page is put together
 	_, err := tpls.Execute(&out, "book")
 	if err != nil {
-		t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
+		t.Errorf("Error executing Gledki.Execute: %s", err.Error())
 	}
 	if strings.Contains(out.String(), `<div class="book">`) {
 		t.Log("Expected content")
 	} else {
-		t.Fatalf("Expected content was not found:\n%s", out.String())
+		t.Errorf("Expected content was not found:\n%s", out.String())
 	}
 }
 
@@ -210,18 +210,18 @@ func TestAddExecuteFuncWithTheme(t *testing.T) {
 	// Even later, when the whole page is put together
 	_, err := tpls.Execute(&out, "book")
 	if err != nil {
-		t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
+		t.Errorf("Error executing Gledki.Execute: %s", err.Error())
 	}
 	outStr := out.String()
 	if strings.Contains(outStr, `<div class="black book">`) {
 		t.Log("Expected 'black' class")
 	} else {
-		t.Fatalf("Expected class 'black' was not found:\n%s", outStr)
+		t.Errorf("Expected class 'black' was not found:\n%s", outStr)
 	}
 	if strings.Contains(outStr, `<title>black`) {
 		t.Log("Expected 'black' title")
 	} else {
-		t.Fatalf("Expected 'black' title was not found:\n%s", outStr)
+		t.Errorf("Expected 'black' title was not found:\n%s", outStr)
 	}
 	// t.Log(outStr)
 
@@ -273,13 +273,13 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 	out.Reset()
 	_, err := tpls.Execute(&out, "includes")
 	if err != nil {
-		t.Fatalf("Error executing Gledki.Execute: %s", err.Error())
+		t.Errorf("Error executing Gledki.Execute: %s", err.Error())
 	}
 	outstr := out.String()
 	t.Log(outstr)
 
 	if !strings.Contains(outstr, "4 4") {
-		t.Fatalf("output does not contain expected value 4 4")
+		t.Errorf("output does not contain expected value 4 4")
 	}
 }
 
@@ -288,7 +288,7 @@ func TestFtExecString(t *testing.T) {
 	partial := `<div class="pager">${prev}${next}</div>`
 	out := tpls.FtExecString(partial, Stash{`prev`: `previous`})
 	if strings.Contains(out, "next") {
-		t.Fatal("String should not contain unused placeholder 'next'!")
+		t.Error("String should not contain unused placeholder 'next'!")
 	}
 }
 
@@ -298,10 +298,10 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %v", err)
 		} else {
-			t.Fatalf("Wrong error: %v", err)
+			t.Errorf("Wrong error: %v", err)
 		}
 	} else {
-		t.Fatal("No error - this is unexpected!")
+		t.Error("No error - this is unexpected!")
 	}
 	tpls, _ := New([]string{includePaths[0] + "/../tpls_bad"}, filesExt, tagsPair, false)
 	tpls.Logger = logger
@@ -311,10 +311,10 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, syscall.ENOENT) {
 			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf(`Wrong error: %s`, errstr)
+			t.Errorf(`Wrong error: %s`, errstr)
 		}
 	} else {
-		t.Fatal("No error - this is unexpected!")
+		t.Error("No error - this is unexpected!")
 	}
 
 	out.Reset()
@@ -323,10 +323,10 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, syscall.ENOENT) {
 			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error: %s", errstr)
+			t.Errorf("Wrong error: %s", errstr)
 		}
 	} else {
-		t.Fatal("No error - this is unexpected!")
+		t.Error("No error - this is unexpected!")
 	}
 
 	out.Reset()
@@ -335,10 +335,10 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, syscall.ENOENT) {
 			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error: %s", errstr)
+			t.Errorf("Wrong error: %s", errstr)
 		}
 	} else {
-		t.Fatalf("No error - this is unexpected! Output: %s", out.String())
+		t.Errorf("No error - this is unexpected! Output: %s", out.String())
 	}
 	out.Reset()
 	if _, err := tpls.Execute(&out, "incl_no_wrapper.htm"); err != nil {
@@ -346,10 +346,10 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, syscall.ENOENT) {
 			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error: %s", errstr)
+			t.Errorf("Wrong error: %s", errstr)
 		}
 	} else {
-		t.Fatalf("No error - this is unexpected! Output: %s", out.String())
+		t.Errorf("No error - this is unexpected! Output: %s", out.String())
 	}
 
 	out.Reset()
@@ -358,15 +358,15 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, syscall.ENOENT) {
 			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error:%s", errstr)
+			t.Errorf("Wrong error:%s", errstr)
 		}
 	} else {
-		t.Fatalf("No error - this is unexpected! Output: %s", out.String())
+		t.Errorf("No error - this is unexpected! Output: %s", out.String())
 	}
 
 	absRoot, err := filepath.Abs(includePaths[0])
 	if err != nil {
-		t.Fatalf("Error finding absolute path: %s", err.Error())
+		t.Errorf("Error finding absolute path: %s", err.Error())
 	}
 	_ = tpls.findRoots([]string{absRoot})
 	if tpls.Roots[0] == absRoot {
@@ -380,7 +380,7 @@ func TestErrors(t *testing.T) {
 		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %s", errstr)
 		} else {
-			t.Fatalf("Wrong error:%s", errstr)
+			t.Errorf("Wrong error:%s", errstr)
 		}
 	}
 }
@@ -388,7 +388,7 @@ func TestErrors(t *testing.T) {
 func expectPanic(t *testing.T, f func()) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Fatalf("MISSING PANIC")
+			t.Error("MISSING PANIC")
 		} else {
 			t.Log(r)
 		}

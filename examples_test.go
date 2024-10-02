@@ -45,7 +45,7 @@ func Example_New_err() {
 		fmt.Println(err.Error())
 	}
 	// Output:
-	// Gledki root directory '/ala/bala': file does not exist!
+	// Gledki root directory '/ala/bala': file does not exist.
 }
 
 func ExampleGledki_Execute_simple() {
