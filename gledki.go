@@ -330,7 +330,7 @@ func (t *Gledki) findRoots(roots []string) error {
 				t.Roots = append(t.Roots, byCwd)
 				continue
 			} else {
-				return fmt.Errorf("gledki root directory '%s' does not exist! You have to create it. ", byCwd)
+				return fmt.Errorf("Gledki root directory '%s': %w! You have to create it.", byCwd, os.ErrNotExist)
 			}
 		}
 
@@ -338,7 +338,7 @@ func (t *Gledki) findRoots(roots []string) error {
 			t.Roots = append(t.Roots, root)
 			continue
 		} else {
-			return fmt.Errorf("Gledki root directory '%s' does not exist!", root)
+			return fmt.Errorf("Gledki root directory '%s': %w.", root, os.ErrNotExist)
 		}
 	}
 	return nil
