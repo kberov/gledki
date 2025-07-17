@@ -14,7 +14,7 @@ output as needed. Leveraging cleverly TagFunc gives us complete separation of
 concerns. In TagFunc we can invoke [Gledki.Compile] to preprare partial
 templates, make any calculatuons and prepare the output for replacement in the
 main template. No need to learn a new template language. The possibilities of
-his simple but powerful technique ispired me to write this wrapper.
+this simple but powerful technique ispired me to write this wrapper.
 Ah, and „gledki(гледки)“ means "views" in Bulgarian.
 
 See the tests and sample templates for usage examples.

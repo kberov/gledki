@@ -14,9 +14,9 @@ var filesExt = ".htm"
 var logger *log.Logger
 var tagsPair = [2]string{"${", "}"}
 
-//var out strings.Builder
+// var out strings.Builder
 
-func Example_New() {
+func Example_new() {
 	tpls, err := gl.New(Roots, filesExt, tagsPair, false)
 	if err != nil {
 		fmt.Print("Error:", err.Error())
@@ -39,7 +39,7 @@ func Example_New() {
 	//	Logger: *log.Logger from "github.com/labstack/gommon/log"
 }
 
-func Example_New_err() {
+func Example_new_err() {
 	// New may return various errors
 	if _, err := gl.New([]string{"/ala/bala"}, filesExt, tagsPair, false); err != nil {
 		fmt.Println(err.Error())

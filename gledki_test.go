@@ -56,7 +56,7 @@ func TestNew(t *testing.T) {
 	tpls, err = New(includePaths, filesExt, tagsPair, false)
 	tpls.Logger = logger
 	if err != nil {
-		t.Error("Eror New: ", err.Error())
+		t.Error("Error New: ", err.Error())
 	}
 	if len(tpls.files) > 0 {
 		t.Error("templates should not be loaded")
