@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/labstack/gommon/log"
@@ -329,7 +328,7 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "no_wrapper"); err != nil {
 		errstr := err.Error()
-		if errors.Is(err, syscall.ENOENT) {
+		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %s", errstr)
 		} else {
 			t.Errorf(`Wrong error: %s`, errstr)
@@ -341,7 +340,7 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "nosuchfile"); err != nil {
 		errstr := err.Error()
-		if errors.Is(err, syscall.ENOENT) {
+		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %s", errstr)
 		} else {
 			t.Errorf("Wrong error: %s", errstr)
@@ -353,7 +352,7 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "no_include"); err != nil {
 		errstr := err.Error()
-		if errors.Is(err, syscall.ENOENT) {
+		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %s", errstr)
 		} else {
 			t.Errorf("Wrong error: %s", errstr)
@@ -364,7 +363,7 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "incl_no_wrapper.htm"); err != nil {
 		errstr := err.Error()
-		if errors.Is(err, syscall.ENOENT) {
+		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %s", errstr)
 		} else {
 			t.Errorf("Wrong error: %s", errstr)
@@ -376,7 +375,7 @@ func TestErrors(t *testing.T) {
 	out.Reset()
 	if _, err := tpls.Execute(&out, "incl_no_include.htm"); err != nil {
 		errstr := err.Error()
-		if errors.Is(err, syscall.ENOENT) {
+		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %s", errstr)
 		} else {
 			t.Errorf("Wrong error:%s", errstr)
