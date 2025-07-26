@@ -22,7 +22,6 @@ See the tests and sample templates for usage examples.
 package gledki
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -260,7 +259,7 @@ func (t *Gledki) loadFiles() error {
 // loaded.
 func (t *Gledki) LoadFile(path string) (string, error) {
 	path = t.toFullPath(path)
-	if text, ok := t.files[path]; ok && len(text) > 0 {
+	if text, ok := t.files[path]; ok && text != `` {
 		return text, nil
 	}
 	data, err := os.ReadFile(path)
@@ -312,15 +311,15 @@ func (t *Gledki) MergeStash(data Stash) {
 	}
 }
 
-// Tries to find the given root paths and stores them as absolute. If the
-// provided roots are relative, the function expects the roots to be relative to
-// the Executable file or to the current working directory. If some of the
-// roots does not exist, this function returns an error.
+// findRoots tries to find the given root paths and stores them as absolute. If
+// the  provided roots are relative, the function expects the roots to be
+// relative to the executable file or to the current working directory. If
+// some of the roots does not exist, this function returns an error.
 func (t *Gledki) findRoots(roots []string) error {
 	for _, root := range roots {
 		if !filepath.IsAbs(root) {
 			var absRoot string
-			if absRoot = findUp(root); absRoot != "" {
+			if absRoot = findDirUp(root); absRoot != "" {
 				t.Roots = append(t.Roots, absRoot)
 				continue
 			}
@@ -338,20 +337,19 @@ func (t *Gledki) findRoots(roots []string) error {
 	return nil
 }
 
-func findUp(dir string) string {
+func findDirUp(dir string) string {
 	cwd, _ := os.Getwd()
 	absRoot := filepath.Join(cwd, dir)
 	if dirExists(absRoot) {
 		return absRoot
 	}
-	i := 0
 	for !dirExists(absRoot) {
 		cwd = filepath.Dir(cwd)
 		absRoot = filepath.Join(cwd, dir)
 		if dirExists(absRoot) {
 			return absRoot
 		}
-		if i++; i > 10 {
+		if cwd[len(cwd)-1] == filepath.Separator {
 			break
 		}
 	}
@@ -360,19 +358,13 @@ func findUp(dir string) string {
 
 func dirExists(path string) bool {
 	finfo, err := os.Stat(path)
-	if err != nil && errors.Is(err, os.ErrNotExist) || !finfo.IsDir() {
-		return false
-	}
-	return true
+	return err == nil && finfo.IsDir()
 }
 
 func isReadable(path string) bool {
 	fh, err := os.Open(path)
-	if err != nil {
-		return false
-	}
 	_ = fh.Close()
-	return true
+	return err == nil
 }
 
 // Replaces all occurances of 'include path/to/template' in 'text' with the
