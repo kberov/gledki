@@ -14,7 +14,7 @@ output as needed. Leveraging cleverly TagFunc gives us complete separation of
 concerns. In TagFunc we can invoke [Gledki.Compile] to preprare partial
 templates, make any calculatuons and prepare the output for replacement in the
 main template. No need to learn a new template language. The possibilities of
-his simple but powerful technique ispired me to write this wrapper.
+this simple but powerful technique ispired me to write this wrapper.
 Ah, and „gledki(гледки)“ means "views" in Bulgarian.
 
 See the tests and sample templates for usage examples.
@@ -43,12 +43,12 @@ type TagFunc = fasttemplate.TagFunc
 // path => slurped file content
 type filesMap map[string]string
 
-// Stash is `map[string]any` for replacement into templates. It has
-// the value types' requirements for fasttemplate:
-//   - []byte - the fastest value type
-//   - string - convenient value type
-//   - TagFunc - flexible value type
-type Stash map[string]any
+// Stash is an alias for `map[string]any` for replacement into templates. It
+// has the same value types' requirements as for fasttemplate:
+//   - []byte - the fastest value type;
+//   - string - convenient value type;
+//   - TagFunc - flexible value type.
+type Stash = map[string]any
 
 // Gledki manages files and data for fasttemplate.
 type Gledki struct {
@@ -97,9 +97,9 @@ New instantiates a new [Gledki] struct and returns a reference to it. Prepares
 */
 func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, error) {
 	t := &Gledki{
-		Stash:        make(Stash, 5),
-		compiled:     make(filesMap, 5),
-		files:        make(filesMap, 5),
+		Stash:        make(Stash, 15),
+		compiled:     make(filesMap, 15),
+		files:        make(filesMap, 15),
 		Ext:          ext,
 		Tags:         tags,
 		IncludeLimit: 3,
@@ -312,36 +312,50 @@ func (t *Gledki) MergeStash(data Stash) {
 	}
 }
 
-// Tries to find existing absolute paths given the root paths. If the
+// Tries to find the given root paths and stores them as absolute. If the
 // provided roots are relative, the function expects the roots to be relative to
 // the Executable file or to the current working directory. If some of the
 // roots does not exist, this function returns an error.
 func (t *Gledki) findRoots(roots []string) error {
 	for _, root := range roots {
 		if !filepath.IsAbs(root) {
-			byExe := filepath.Join(findBinDir(), root)
-			if dirExists(byExe) {
-				t.Roots = append(t.Roots, byExe)
+			var absRoot string
+			if absRoot = findUp(root); absRoot != "" {
+				t.Roots = append(t.Roots, absRoot)
 				continue
 			}
-			// Now try by CWD
-			byCwd, _ := filepath.Abs(root)
-			if dirExists(byCwd) {
-				t.Roots = append(t.Roots, byCwd)
-				continue
-			} else {
-				return fmt.Errorf("gledki root directory '%s' does not exist! You have to create it. ", byCwd)
-			}
+			return fmt.Errorf(
+				"Gledki root directory '%s': %w! You have to create it.",
+				root, os.ErrNotExist)
 		}
 
 		if dirExists(root) {
 			t.Roots = append(t.Roots, root)
 			continue
-		} else {
-			return fmt.Errorf("Gledki root directory '%s' does not exist!", root)
 		}
+		return fmt.Errorf("Gledki root directory '%s': %w.", root, os.ErrNotExist)
 	}
 	return nil
+}
+
+func findUp(dir string) string {
+	cwd, _ := os.Getwd()
+	absRoot := filepath.Join(cwd, dir)
+	if dirExists(absRoot) {
+		return absRoot
+	}
+	i := 0
+	for !dirExists(absRoot) {
+		cwd = filepath.Dir(cwd)
+		absRoot = filepath.Join(cwd, dir)
+		if dirExists(absRoot) {
+			return absRoot
+		}
+		if i++; i > 10 {
+			break
+		}
+	}
+	return ""
 }
 
 func dirExists(path string) bool {
@@ -361,15 +375,7 @@ func isReadable(path string) bool {
 	return true
 }
 
-func findBinDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		panic(err)
-	}
-	return filepath.Dir(exe)
-}
-
-// Replaces all occurances of `include path/to/template` in `text` with the
+// Replaces all occurances of 'include path/to/template' in 'text' with the
 // contents of the partial templates. Panics in case the t.IncludeLimit is
 // reached. If you have deeply nested included files you may need to set a
 // bigger integer.
