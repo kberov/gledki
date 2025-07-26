@@ -17,7 +17,7 @@ import (
 
 var includePaths = []string{"./testdata/tpls", "./testdata/tpls/theme"}
 var filesExt = ".htm"
-var logger *log.Logger
+var logger = log.New("gledki")
 var tagsPair = [2]string{"${", "}"}
 var out strings.Builder
 
@@ -33,17 +33,33 @@ func init() {
 		})
 	}
 	var lgbuf = bytes.NewBuffer([]byte(""))
-	logger = log.New("gledki")
+
 	logger.SetOutput(lgbuf)
-	logger.SetLevel(log.DEBUG)
 	logger.SetHeader(defaultLogHeader)
 }
 
+var v bool
+
+func setVerboseLoggerOnce() {
+	if logger == nil {
+
+		panic("logger is nil")
+	}
+	if v {
+		return
+	}
+	if v = testing.Verbose(); v {
+		logger.SetLevel(log.DEBUG)
+	}
+}
+
 func TestNew(t *testing.T) {
+	setVerboseLoggerOnce()
 	// load templates
 	tpls, err := New(includePaths, filesExt, tagsPair, true)
 	if err != nil {
-		t.Error("Error New: ", err.Error())
+		t.Error(err.Error())
+		return
 	} else {
 		tpls.Logger = logger
 		t.Logf("\ngledki.New loads all files in %s", includePaths)
@@ -54,7 +70,6 @@ func TestNew(t *testing.T) {
 	}
 	// do not load templates
 	tpls, err = New(includePaths, filesExt, tagsPair, false)
-	tpls.Logger = logger
 	if err != nil {
 		t.Error("Error New: ", err.Error())
 	}
@@ -81,6 +96,7 @@ var data = Stash{
 }
 
 func TestExecute(t *testing.T) {
+	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	tpls.Logger = logger
 	tpls.Stash = data
@@ -128,6 +144,7 @@ func TestExecute(t *testing.T) {
 }
 
 func otherBooks(tpls *Gledki) TagFunc {
+	setVerboseLoggerOnce()
 	return TagFunc(func(w io.Writer, tag string) (int, error) {
 		// for more complex file, containing wrapper and include directives, you
 		// must use tpls.Compile("path/to/file")
@@ -147,7 +164,7 @@ func otherBooks(tpls *Gledki) TagFunc {
 }
 
 func TestAddExecuteFunc(t *testing.T) {
-
+	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	tpls.Logger = logger
 
@@ -186,6 +203,7 @@ func TestAddExecuteFunc(t *testing.T) {
 // We put the second path as first, so files in it will be found first, if they
 // exist. The test is successful if the "black" theme files are used.
 func TestAddExecuteFuncWithTheme(t *testing.T) {
+	setVerboseLoggerOnce()
 	roots := []string{includePaths[1], includePaths[0]}
 	tpls, _ := New(roots, filesExt, tagsPair, false)
 	tpls.Logger = logger
@@ -228,6 +246,7 @@ func TestAddExecuteFuncWithTheme(t *testing.T) {
 }
 
 func TestIncludeLimitPanic(t *testing.T) {
+	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	tpls.Stash = Stash{
 		"title":     "Possibly recursive inclusions",
@@ -244,7 +263,7 @@ func TestIncludeLimitPanic(t *testing.T) {
 }
 
 func TestOtherPanics(t *testing.T) {
-
+	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	path := "/ff/a.htm"
 	tpls.compiled[path] = "bla"
@@ -255,6 +274,7 @@ func TestOtherPanics(t *testing.T) {
 }
 
 func TestIncludeLimitNoPanic(t *testing.T) {
+	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 
 	tpls.Stash = Stash{
@@ -284,6 +304,7 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 }
 
 func TestFtExecString(t *testing.T) {
+	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	partial := `<div class="pager">${prev}${next}</div>`
 	out := tpls.FtExecString(partial, Stash{`prev`: `previous`})
@@ -293,7 +314,7 @@ func TestFtExecString(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-
+	setVerboseLoggerOnce()
 	if _, err := New([]string{"/ala/bala/nica"}, filesExt, tagsPair, false); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			t.Logf("Right error: %v", err)

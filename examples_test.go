@@ -32,7 +32,7 @@ func Example_new() {
 		tpls.Tags, tpls.IncludeLimit, tpls.Logger)
 	// Output:
 	// A gledki object properties:
-	//	Stash: gledki.Stash{}
+	//	Stash: map[string]interface {}{}
 	//	Ext: ".htm"
 	//	Tags: [2]string{"${", "}"}
 	//	IncludeLimit: 3 (default)
