@@ -36,7 +36,15 @@ import (
 	"github.com/valyala/fasttemplate"
 )
 
-// TagFunc is an alias for [fasttemplate.TagFunc].
+/*
+TagFunc is an alias for [fasttemplate.TagFunc].
+TagFunc can be used as a substitution value in the map passed to Execute*.
+Execute* functions pass tag (placeholder) name in 'tag' argument.
+
+TagFunc must be safe to call from concurrently running goroutines.
+
+TagFunc must write contents to w and return the number of bytes written.
+*/
 type TagFunc = fasttemplate.TagFunc
 
 // path => slurped file content
@@ -77,7 +85,7 @@ type Gledki struct {
 	res map[string]*regexp.Regexp
 }
 
-const defaultLogHeader = `${prefix}:${time_rfc3339}:${level}:${short_file}:${line}`
+const defaultLogHeader = `${prefix}:${level}:${short_file}:${line}`
 
 // CompiledSuffix is appended to the extension of compiled templates.
 var CompiledSuffix = "c"
@@ -86,7 +94,7 @@ var spf = fmt.Sprintf
 
 // CacheTemplates can be set to false to disable caching of compiled templates
 // both in memory and on disk during development.
-var CacheTemplates bool = true
+var CacheTemplates = true
 
 /*
 New instantiates a new [Gledki] struct and returns a reference to it. Prepares
@@ -144,7 +152,7 @@ Compile composes a template and returns its content or an error. This means:
     application. The content of the compiled template is stored on disk with a
     suffix (see [CompiledSuffix]), attached to the extension of the file in the
     same directory where the template file resides. The storing of the compiled
-    file is done concurently in a goroutine while being executed.
+    file is done concurently in a goroutine while the file is being executed.
   - On the next run of the application the compiled file is simply loaded
     and its content retuned. All the steps above are skipped.
 
@@ -240,7 +248,7 @@ func (t *Gledki) FtExecStringStd(template string, data Stash) string {
 
 func (t *Gledki) loadFiles() error {
 	for _, root := range t.Roots {
-		if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err := filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
 			if strings.HasSuffix(path, t.Ext) {
 				if _, err = t.LoadFile(path); err != nil {
 					return err
@@ -295,9 +303,8 @@ func (t *Gledki) toFullPath(path string) string {
 		}
 		if isReadable(foundPath) {
 			return foundPath
-		} else {
-			continue
 		}
+		continue
 	}
 	return path
 }
@@ -324,7 +331,7 @@ func (t *Gledki) findRoots(roots []string) error {
 				continue
 			}
 			return fmt.Errorf(
-				"Gledki root directory '%s': %w! You have to create it.",
+				"gledki root directory '%s': %w! You have to create it",
 				root, os.ErrNotExist)
 		}
 
@@ -332,7 +339,7 @@ func (t *Gledki) findRoots(roots []string) error {
 			t.Roots = append(t.Roots, root)
 			continue
 		}
-		return fmt.Errorf("Gledki root directory '%s': %w.", root, os.ErrNotExist)
+		return fmt.Errorf("gledki root directory '%s': %w", root, os.ErrNotExist)
 	}
 	return nil
 }

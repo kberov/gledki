@@ -24,7 +24,7 @@ var out strings.Builder
 func init() {
 	sfx := filesExt + CompiledSuffix
 	for _, dir := range includePaths {
-		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
 			if strings.HasSuffix(path, sfx) {
 				os.Remove(path)
 			}
@@ -59,13 +59,12 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Error(err.Error())
 		return
-	} else {
-		tpls.Logger = logger
-		t.Logf("\ngledki.New loads all files in %s", includePaths)
-		for k := range tpls.files {
-			_ = k
-			//	t.Logf("file: %s", k)
-		}
+	}
+	tpls.Logger = logger
+	t.Logf("\ngledki.New loads all files in %s", includePaths)
+	for k := range tpls.files {
+		_ = k
+		//	t.Logf("file: %s", k)
 	}
 	// do not load templates
 	tpls, err = New(includePaths, filesExt, tagsPair, false)
@@ -144,7 +143,7 @@ func TestExecute(t *testing.T) {
 
 func otherBooks(tpls *Gledki) TagFunc {
 	setVerboseLoggerOnce()
-	return TagFunc(func(w io.Writer, tag string) (int, error) {
+	return TagFunc(func(w io.Writer, _ string) (int, error) {
 		// for more complex file, containing wrapper and include directives, you
 		// must use tpls.Compile("path/to/file")
 		template := tpls.MustLoadFile("partials/_book_item")
@@ -253,7 +252,7 @@ func TestIncludeLimitPanic(t *testing.T) {
 		"included":  "included",
 	}
 	level := 0
-	tpls.Stash["level"] = TagFunc(func(w io.Writer, tag string) (int, error) {
+	tpls.Stash["level"] = TagFunc(func(w io.Writer, _ string) (int, error) {
 		level++
 		return w.Write([]byte(spf("%d", level)))
 	})
@@ -282,7 +281,7 @@ func TestIncludeLimitNoPanic(t *testing.T) {
 		"included":  "included",
 	}
 	level := 0
-	tpls.Stash["level"] = TagFunc(func(w io.Writer, tag string) (int, error) {
+	tpls.Stash["level"] = TagFunc(func(w io.Writer, _ string) (int, error) {
 		level++
 		return w.Write([]byte(spf("%d", level)))
 	})

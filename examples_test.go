@@ -1,3 +1,4 @@
+//nolint:all
 package gledki_test
 
 import (
@@ -16,7 +17,7 @@ var tagsPair = [2]string{"${", "}"}
 
 // var out strings.Builder
 
-func Example_new() {
+func ExampleNew() {
 	tpls, err := gl.New(Roots, filesExt, tagsPair, false)
 	if err != nil {
 		fmt.Print("Error:", err.Error())
@@ -39,15 +40,16 @@ func Example_new() {
 	//	Logger: *log.Logger from "github.com/labstack/gommon/log"
 }
 
-func Example_new_err() {
+func ExampleNew_err() {
 	// New may return various errors
 	if _, err := gl.New([]string{"/ala/bala"}, filesExt, tagsPair, false); err != nil {
 		fmt.Println(err.Error())
 	}
 	// Output:
-	// Gledki root directory '/ala/bala': file does not exist.
+	// gledki root directory '/ala/bala': file does not exist
 }
 
+//nolint:all
 func ExampleGledki_Execute_simple() {
 
 	// Once on startup.
@@ -61,10 +63,11 @@ func ExampleGledki_Execute_simple() {
 	// Later… many times and with various data (string, []byte, gledki.TagFunc)
 	tpls.Stash = map[string]any{"generator": "Гледки"}
 
-	// Somwhere else in your program…
+	// Somewhere else in your program…
 	tpls.MergeStash(gl.Stash{
 		"title": "Hello",
-		"body": gl.TagFunc(func(w io.Writer, tag string) (int, error) {
+		"body": gl.TagFunc(func(w io.Writer, _ string) (int, error) {
+
 			// tmpls.Stash entries and even the entire Stash can be modified
 			// from within tmpls.TagFunc
 			tpls.Stash["generator"] = "Something"
