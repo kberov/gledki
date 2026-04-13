@@ -80,7 +80,7 @@ type Gledki struct {
 	// To wait while the compiled template is being stored.
 	wg sync.WaitGroup
 	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
-	Logger
+	Logger Logger
 	// regex objects instantiated in New() and ready for use.
 	res map[string]*regexp.Regexp
 }
@@ -148,11 +148,12 @@ Compile composes a template and returns its content or an error. This means:
     at these places without rendering any placeholders. The inclusion
     is done recursively. See Gledki.IncludeLimit.
   - The compiled template is stored in a private map[filename(string)]string,
-    attached to *Gledki for subsequent use during the same run of the
-    application. The content of the compiled template is stored on disk with a
-    suffix (see [CompiledSuffix]), attached to the extension of the file in the
-    same directory where the template file resides. The storing of the compiled
-    file is done concurently in a goroutine while the file is being executed.
+    attached to *Gledki (the current instance) for subsequent use during the same
+    run of the application. The content of the compiled template is stored on
+    disk with a suffix (see [CompiledSuffix]), attached to the extension of the
+    file in the same directory where the template file resides. The storing of
+    the compiled file is done concurently in a goroutine while the file is being
+    executed.
   - On the next run of the application the compiled file is simply loaded
     and its content retuned. All the steps above are skipped.
 
@@ -227,6 +228,7 @@ func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 
 // clearStash makes a new Stash.
 func (t *Gledki) clearStash() {
+	t.Logger.Debugf(`Cleared the stash!..`)
 	t.makeStash()
 }
 
@@ -433,7 +435,7 @@ func (t *Gledki) wrap(text string) (string, error) {
 	re := t.res["wrap"]
 	// allow only one wrapper
 	match := re.FindStringSubmatch(text)
-	if len(match) > 0 {
+	if len(match) > 2 {
 		// t.Logger.Debugf("wrapper: %#v", match)
 		wrapperFile, err := t.LoadFile(string(match[2]))
 		if err != nil {

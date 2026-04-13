@@ -85,3 +85,14 @@ tpls.Execute(os.Stdout, "simple")
 ```
 
 See other examples in gledki_test.go.
+
+# TODO (May be some day...)
+
+* Add setter (and maybe getter) for gledki.Stash, so one can add any type of
+  data. The getter choses the appropriate type - `[]byte` if possible, or
+  TagFunc.
+* Add possibility for variables to be set in the templates. They will be local
+  variables - for the templates only. And will be kept in a local GOB data
+  embedded into the compiled template. This means that we will have a new
+  compile-time directive.
+* Think of ways to allow usage of embedded filesystems.

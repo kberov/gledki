@@ -24,12 +24,15 @@ var out strings.Builder
 func init() {
 	sfx := filesExt + CompiledSuffix
 	for _, dir := range includePaths {
-		filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
+		e := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
 			if strings.HasSuffix(path, sfx) {
-				os.Remove(path)
+				_ = os.Remove(path)
 			}
 			return err
 		})
+		if e != nil {
+			panic(e.Error())
+		}
 	}
 	var lgbuf = bytes.NewBuffer([]byte(""))
 
@@ -75,11 +78,11 @@ func TestNew(t *testing.T) {
 		t.Error("templates should not be loaded")
 	}
 	//Try to load nonreadable templates
-	os.Chmod(includePaths[0]+"/../tpls_bad/_noread.htm", 0300)
+	_ = os.Chmod(includePaths[0]+"/../tpls_bad/_noread.htm", 0300)
 	_, err = New([]string{includePaths[0] + "/../tpls_bad"}, filesExt, tagsPair, true)
 	if err != nil {
 		t.Logf("Expected error from New: %s", err.Error())
-		os.Chmod(includePaths[0]+"/../tpls_bad/_noread.htm", 0400)
+		_ = os.Chmod(includePaths[0]+"/../tpls_bad/_noread.htm", 0400)
 	} else {
 		t.Error("Reading nonreadable file should have failed!")
 	}
