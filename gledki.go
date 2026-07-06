@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -161,15 +162,15 @@ included files you may need to set a bigger integer. This method is suitable
 for use in a ft.TagFunc to preprare parts of the output to be replaced in the
 main template.
 */
-func (t *Gledki) Compile(path string) (string, error) {
+func (t *Gledki) Compile(path string) (text string, err error) {
 	path = t.toFullPath(path)
-	if text, e := t.loadCompiled(path); e == nil {
-		return text, nil
+	if text, err = t.loadCompiled(path); err == nil {
+		return text, err
 	}
 	// t.Logger.Debugf("Compile('%s')", path)
-	text, err := t.LoadFile(path)
-	if err != nil {
-		return "", err
+
+	if text, err = t.LoadFile(path); err != nil {
+		return text, err
 	}
 	if text, err = t.wrap(text); err != nil {
 		return text, err
@@ -178,12 +179,12 @@ func (t *Gledki) Compile(path string) (string, error) {
 	if text, err = t.include(text); err != nil {
 		return text, err
 	}
+	t.compiled[path] = text
 	if CacheTemplates {
-		t.compiled[path] = text
-		t.wg.Add(1)
-		go t.storeCompiled(path, t.compiled[path])
+		t.wg.Go(func() { t.storeCompiled(path, t.compiled[path]) })
+		t.wg.Wait()
 	}
-	return text, nil
+	return text, err
 }
 
 func (t *Gledki) loadCompiled(fullPath string) (string, error) {
@@ -200,7 +201,6 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 }
 
 func (t *Gledki) storeCompiled(fullPath, text string) {
-	defer t.wg.Done()
 	// t.Logger.Debugf("storeCompiled('%s')", fullPath)
 	err := os.WriteFile(fullPath+CompiledSuffix, []byte(text), 0600)
 	if err != nil {
@@ -221,7 +221,6 @@ func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 		return 0, err
 	}
 	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.Stash)
-	t.wg.Wait()
 	return length, err
 }
 
@@ -324,9 +323,7 @@ func (t *Gledki) toFullPath(path string) string {
 // [fasttemplate.Execute] in [Gledki.Execute]. If entries with the same key
 // exist, they will be overriden with the new values.
 func (t *Gledki) MergeStash(data Stash) {
-	for k, v := range data {
-		t.Stash[k] = v
-	}
+	maps.Copy(t.Stash, data)
 }
 
 // findRoots tries to find the given root paths and stores them as absolute. If
