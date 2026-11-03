@@ -84,6 +84,14 @@ type Gledki struct {
 	Logger Logger
 	// regex objects instantiated in New() and ready for use.
 	res map[string]*regexp.Regexp
+	// fullPaths remembers, for each template path passed to toFullPath, the
+	// full path of the file which toFullPath found on disk. The next time the
+	// same template is needed, its full path is taken from here, without
+	// checking the disk again. A [sync.Map] is used, because one Gledki
+	// instance is often used by many goroutines at the same time (for example
+	// one per HTTP request), and because every entry is written once and then
+	// only read – the case for which sync.Map is made.
+	fullPaths sync.Map
 }
 
 const defaultLogHeader = `${prefix}:${level}:${short_file}:${line}`
@@ -292,11 +300,26 @@ func (t *Gledki) MustLoadFile(path string) string {
 	return partial
 }
 
-// If the template is without extension, appends it. Then finds the first
-// matching file in the range of include paths and returns it.
+// toFullPath returns the full path to the file of the template `path`. If
+// `path` is without extension, it appends [Gledki.Ext]. Then it looks in the
+// [Gledki.Roots] in their order and returns the first file, which exists and
+// can be read. If no such file is found, it returns `path` (with the
+// extension), and the caller gets an error when it tries to read the file.
+//
+// Looking for the file means opening it on disk, which is slow compared to the
+// rest of the work. So when [CacheTemplates] is true, the found full path is
+// remembered in [Gledki.fullPaths] and the next call with the same `path`
+// returns it without touching the disk. A path, for which no file was found,
+// is not remembered, so a file created later will still be found. When
+// CacheTemplates is false (during development), nothing is remembered, so a
+// file added to a root, which comes earlier in Roots, is used at once.
 func (t *Gledki) toFullPath(path string) string {
+	if fullPath, ok := t.fullPaths.Load(path); ok {
+		return fullPath.(string)
+	}
+	requested := path
 	if !strings.HasSuffix(path, t.Ext) {
-		path = path + t.Ext
+		path += t.Ext
 	}
 	for _, root := range t.Roots {
 		foundPath := path
@@ -304,9 +327,11 @@ func (t *Gledki) toFullPath(path string) string {
 			foundPath = filepath.Join(root, path)
 		}
 		if isReadable(foundPath) {
+			if CacheTemplates {
+				t.fullPaths.Store(requested, foundPath)
+			}
 			return foundPath
 		}
-		continue
 	}
 	return path
 }

@@ -417,3 +417,57 @@ func expectPanic(t *testing.T, f func()) {
 	}()
 	f()
 }
+
+func TestToFullPathRemembers(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "card"+filesExt)
+	if err := os.WriteFile(file, []byte("card"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tpls, err := New([]string{root}, filesExt, tagsPair, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := tpls.toFullPath("card"); got != file {
+		t.Fatalf("first call: want %q, got %q", file, got)
+	}
+	// The file is removed from disk, but its full path was remembered, so
+	// the disk is not checked again.
+	if err = os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if got := tpls.toFullPath("card"); got != file {
+		t.Fatalf("remembered: want %q, got %q", file, got)
+	}
+
+	// A path, for which no file was found, is not remembered: a file, created
+	// later, is found.
+	later := filepath.Join(root, "later"+filesExt)
+	if got := tpls.toFullPath("later"); got != "later"+filesExt {
+		t.Fatalf("missing file: want %q, got %q", "later"+filesExt, got)
+	}
+	if err = os.WriteFile(later, []byte("later"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tpls.toFullPath("later"); got != later {
+		t.Fatalf("created later: want %q, got %q", later, got)
+	}
+
+	// With CacheTemplates false nothing is remembered.
+	CacheTemplates = false
+	t.Cleanup(func() { CacheTemplates = true })
+	nocache := filepath.Join(root, "nocache"+filesExt)
+	if err = os.WriteFile(nocache, []byte("nocache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tpls.toFullPath("nocache"); got != nocache {
+		t.Fatalf("no cache: want %q, got %q", nocache, got)
+	}
+	if err = os.Remove(nocache); err != nil {
+		t.Fatal(err)
+	}
+	if got := tpls.toFullPath("nocache"); got != "nocache"+filesExt {
+		t.Fatalf("no cache, removed: want %q, got %q", "nocache"+filesExt, got)
+	}
+}
