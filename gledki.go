@@ -48,8 +48,37 @@ TagFunc must write contents to w and return the number of bytes written.
 */
 type TagFunc = fasttemplate.TagFunc
 
-// path => slurped file content
-type filesMap map[string]string
+// filesMap keeps the content of files by their full path (full path => file
+// content). One [Gledki] instance is often used by many goroutines at the same
+// time (for example one per HTTP request), and the first requests may load or
+// compile the same template at the same moment. A plain map would be changed
+// and read by them at the same time (a data race). So filesMap keeps the
+// entries in a [sync.Map], which is safe for this. Every entry is written once
+// and then only read – the case for which sync.Map is made. The zero value is
+// ready for use. Do not copy a filesMap after first use.
+type filesMap struct {
+	m sync.Map
+}
+
+// load returns the content stored for `path` and true, or "" and false if
+// nothing is stored for it.
+func (f *filesMap) load(path string) (string, bool) {
+	text, ok := f.m.Load(path)
+	if !ok {
+		return "", false
+	}
+	return text.(string), true
+}
+
+// store keeps `text` as the content for `path`.
+func (f *filesMap) store(path, text string) {
+	f.m.Store(path, text)
+}
+
+// delete forgets the content for `path`.
+func (f *filesMap) delete(path string) {
+	f.m.Delete(path)
+}
 
 // Stash is an alias for `map[string]any` for replacement into templates. It
 // has the same value types' requirements as for fasttemplate:
@@ -76,10 +105,8 @@ type Gledki struct {
 	// Pair of Tags, for example:  "${", "}".
 	Tags [2]string
 	// How deeply files can be included into each other.
-	// Default: 3 starting from 0 in the main template.
+	// Default: 3; starting from 0 in the main template.
 	IncludeLimit int
-	// To wait while the compiled template is being stored.
-	wg sync.WaitGroup
 	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
 	Logger Logger
 	// regex objects instantiated in New() and ready for use.
@@ -114,8 +141,6 @@ New instantiates a new [Gledki] struct and returns a reference to it. Prepares
 func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, error) {
 	t := &Gledki{
 		Stash:        make(Stash, 15),
-		compiled:     make(filesMap, 15),
-		files:        make(filesMap, 15),
 		Ext:          ext,
 		Tags:         tags,
 		IncludeLimit: 3,
@@ -156,13 +181,12 @@ Compile composes a template and returns its content or an error. This means:
     loaded, wrapped (if there is a wrapper directive in them) and included
     at these places without rendering any placeholders. The inclusion
     is done recursively. See Gledki.IncludeLimit.
-  - The compiled template is stored in a private map[filename(string)]string,
-    attached to *Gledki (the current instance) for subsequent use during the same
-    run of the application. The content of the compiled template is stored on
-    disk with a suffix (see [CompiledSuffix]), attached to the extension of the
-    file in the same directory where the template file resides. The storing of
-    the compiled file is done concurently in a goroutine while the file is being
-    executed.
+  - The compiled template is kept in memory, in a private map attached to
+    *Gledki (the current instance), for subsequent use during the same run of
+    the application. If [CacheTemplates] is true, the content of the compiled
+    template is also written to disk with a suffix (see [CompiledSuffix]),
+    attached to the extension of the file, in the same directory where the
+    template file resides. Compile returns after the file is written.
   - On the next run of the application the compiled file is simply loaded
     and its content retuned. All the steps above are skipped.
 
@@ -188,16 +212,15 @@ func (t *Gledki) Compile(path string) (text string, err error) {
 	if text, err = t.include(text); err != nil {
 		return text, err
 	}
-	t.compiled[path] = text
+	t.compiled.store(path, text)
 	if CacheTemplates {
-		t.wg.Go(func() { t.storeCompiled(path, t.compiled[path]) })
-		t.wg.Wait()
+		t.storeCompiled(path, text)
 	}
 	return text, err
 }
 
 func (t *Gledki) loadCompiled(fullPath string) (string, error) {
-	if text, ok := t.compiled[fullPath]; ok {
+	if text, ok := t.compiled.load(fullPath); ok {
 		return text, nil
 	}
 	// t.Logger.Debugf("loadCompiled('%s')", fullPath)
@@ -205,8 +228,9 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("compiled file: %v", err)
 	}
-	t.compiled[fullPath] = string(data)
-	return t.compiled[fullPath], nil
+	text := string(data)
+	t.compiled.store(fullPath, text)
+	return text, nil
 }
 
 func (t *Gledki) storeCompiled(fullPath, text string) {
@@ -296,15 +320,16 @@ func (t *Gledki) loadFiles() error {
 // loaded.
 func (t *Gledki) LoadFile(path string) (string, error) {
 	path = t.toFullPath(path)
-	if text, ok := t.files[path]; ok && text != `` {
+	if text, ok := t.files.load(path); ok && text != `` {
 		return text, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	t.files[path] = string(data)
-	return t.files[path], nil
+	text := string(data)
+	t.files.store(path, text)
+	return text, nil
 }
 
 /*

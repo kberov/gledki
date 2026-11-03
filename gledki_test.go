@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/gommon/log"
@@ -65,16 +66,15 @@ func TestNew(t *testing.T) {
 	}
 	tpls.Logger = logger
 	t.Logf("\ngledki.New loads all files in %s", includePaths)
-	for k := range tpls.files {
-		_ = k
-		//	t.Logf("file: %s", k)
+	if filesCount(&tpls.files) == 0 {
+		t.Error("templates must be loaded")
 	}
 	// do not load templates
 	tpls, err = New(includePaths, filesExt, tagsPair, false)
 	if err != nil {
 		t.Error("Error New: ", err.Error())
 	}
-	if len(tpls.files) > 0 {
+	if filesCount(&tpls.files) > 0 {
 		t.Error("templates should not be loaded")
 	}
 	//Try to load nonreadable templates
@@ -132,7 +132,7 @@ func TestExecute(t *testing.T) {
 	}
 
 	// Delete from t.compiled to load it from disk so this corner is covered too.
-	delete(tpls.compiled, tpls.toFullPath("view"))
+	tpls.compiled.delete(tpls.toFullPath("view"))
 	out.Reset()
 	_, _ = tpls.Execute(&out, "view")
 	outstr = out.String()
@@ -267,9 +267,8 @@ func TestOtherPanics(t *testing.T) {
 	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	path := "/ff/a.htm"
-	tpls.compiled[path] = "bla"
-	tpls.wg.Add(1)
-	expectPanic(t, func() { tpls.storeCompiled(path, tpls.compiled[path]) })
+	tpls.compiled.store(path, "bla")
+	expectPanic(t, func() { tpls.storeCompiled(path, "bla") })
 	expectPanic(t, func() { tpls.MustLoadFile(path) })
 	expectPanic(t, func() { Must([]string{"/aaa/bbb"}, filesExt, tagsPair, false) })
 }
@@ -503,4 +502,42 @@ func TestFtExec(t *testing.T) {
 	if !errors.Is(err, failing) {
 		t.Errorf("want error %v, got %v", failing, err)
 	}
+}
+
+// TestCompileConcurrently compiles the same template, which is not compiled
+// yet, from many goroutines at the same time, like the first HTTP requests
+// after the start of an application do. Run it with -race.
+func TestCompileConcurrently(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "card"+filesExt), []byte("<p>${title}</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tpls, err := New([]string{root}, filesExt, tagsPair, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts := make([]string, 20) // every goroutine writes only to its own slot
+	errs := make([]error, len(texts))
+	var wg sync.WaitGroup
+	for i := range texts {
+		wg.Go(func() { texts[i], errs[i] = tpls.Compile("card") })
+	}
+	wg.Wait()
+	for i := range texts {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: %v", i, errs[i])
+		}
+		if texts[i] != "<p>${title}</p>" {
+			t.Fatalf("goroutine %d: got %q", i, texts[i])
+		}
+	}
+}
+
+// filesCount returns how many entries `f` has.
+func filesCount(f *filesMap) (n int) {
+	f.m.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
 }
