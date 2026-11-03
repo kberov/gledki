@@ -234,6 +234,25 @@ func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 	return length, err
 }
 
+// FtExec replaces the placeholders in `tmpl` with the values from `data` and
+// writes the result directly to `w`. It is a wrapper of [fasttemplate.Execute],
+// which uses the [Gledki.Tags] of this instance. Placeholders, which have no
+// value in `data`, are replaced with nothing, like in [Gledki.FtExecString].
+//
+// Use it instead of FtExecString when the result goes to an [io.Writer]
+// anyway (for example in a [TagFunc]): FtExecString first builds the whole
+// result as a new string, which then has to be copied to the writer. FtExec
+// does neither. Also, if a [TagFunc] in `data` returns an error, FtExec
+// returns it, while FtExecString panics.
+//
+// Unlike [Gledki.Execute], FtExec does not compile a file and does not use or
+// clear [Gledki.Stash]: it works only with the passed `tmpl` and `data`. So it
+// is safe to use from many goroutines at the same time, each with its own
+// `data`.
+func (t *Gledki) FtExec(tmpl string, w io.Writer, data Stash) (int64, error) {
+	return ftExec(tmpl, t.Tags[0], t.Tags[1], w, data)
+}
+
 // FtExecStd is a wrapper around [fasttemplate.ExecuteStd]. Useful for preparing
 // partial templates which will be later included in the main template, because
 // it keeps unknown placeholders untouched.

@@ -471,3 +471,36 @@ func TestToFullPathRemembers(t *testing.T) {
 		t.Fatalf("no cache, removed: want %q, got %q", "nocache"+filesExt, got)
 	}
 }
+
+func TestFtExec(t *testing.T) {
+	tpls, err := New(includePaths, filesExt, tagsPair, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := `<div class="pager">${prev}${next}</div>`
+	var buf bytes.Buffer
+	n, err := tpls.FtExec(partial, &buf, Stash{`prev`: `previous`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<div class="pager">previous</div>`
+	if buf.String() != want {
+		t.Errorf("want %q, got %q", want, buf.String())
+	}
+	if n != int64(len(want)) {
+		t.Errorf("want %d bytes written, got %d", len(want), n)
+	}
+	// The result is the same as from FtExecString.
+	if s := tpls.FtExecString(partial, Stash{`prev`: `previous`}); s != want {
+		t.Errorf("FtExecString: want %q, got %q", want, s)
+	}
+
+	// An error from a TagFunc in the stash is returned, not a panic.
+	failing := errors.New("failing TagFunc")
+	_, err = tpls.FtExec(partial, &buf, Stash{
+		`prev`: TagFunc(func(io.Writer, string) (int, error) { return 0, failing }),
+	})
+	if !errors.Is(err, failing) {
+		t.Errorf("want error %v, got %v", failing, err)
+	}
+}
