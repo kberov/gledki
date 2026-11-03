@@ -105,6 +105,7 @@ New instantiates a new [Gledki] struct and returns a reference to it. Prepares
 */
 func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, error) {
 	t := &Gledki{
+		Stash:        make(Stash, 15),
 		compiled:     make(filesMap, 15),
 		files:        make(filesMap, 15),
 		Ext:          ext,
@@ -112,7 +113,6 @@ func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, e
 		IncludeLimit: 3,
 		Logger:       log.New("gledki"),
 	}
-	t.makeStash()
 	if err := t.findRoots(roots); err != nil {
 		return nil, err
 	}
@@ -216,24 +216,14 @@ var ftExec = fasttemplate.Execute
 // and attaching the extension, passed to [New], if the passed file is only a
 // base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
 func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
-	defer t.clearStash()
+	defer clear(t.Stash)
+
 	text, err := t.Compile(path)
 	if err != nil {
 		return 0, err
 	}
 	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.Stash)
 	return length, err
-}
-
-// clearStash makes a new Stash.
-func (t *Gledki) clearStash() {
-	t.Logger.Debugf(`Cleared the stash!..`)
-	t.makeStash()
-}
-
-// makeStash makes a new Stash.
-func (t *Gledki) makeStash() {
-	t.Stash = make(Stash, 15)
 }
 
 // FtExecStd is a wrapper around [fasttemplate.ExecuteStd]. Useful for preparing
@@ -243,7 +233,7 @@ func (t *Gledki) FtExecStd(tmpl string, w io.Writer, data Stash) (int64, error) 
 	return fasttemplate.ExecuteStd(tmpl, t.Tags[0], t.Tags[1], w, data)
 }
 
-// FtExecString is a wrapper for [fasttemplate.ExecuteString]. Useful for
+// FtExecString is a wrapper of [fasttemplate.ExecuteString]. Useful for
 // preparing partial templates which will be later included in the main
 // template. It does not keep unknown tags.
 func (t *Gledki) FtExecString(template string, data Stash) string {
