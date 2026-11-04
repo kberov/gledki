@@ -603,3 +603,38 @@ func TestCompileCacheTemplates(t *testing.T) {
 		}
 	})
 }
+
+// TestStoreCompiledReplacesAtOnce checks that storeCompiled writes the whole
+// compiled template, replaces an older compiled file and leaves no temporary
+// file behind.
+func TestStoreCompiledReplacesAtOnce(t *testing.T) {
+	root := t.TempDir()
+	fullPath := filepath.Join(root, "card"+filesExt)
+	if err := os.WriteFile(fullPath+CompiledSuffix, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tpls, err := New([]string{root}, filesExt, tagsPair, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpls.storeCompiled(fullPath, "<p>${title}</p>")
+
+	data, err := os.ReadFile(fullPath + CompiledSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "<p>${title}</p>" {
+		t.Fatalf("compiled file: got %q", data)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "card"+filesExt+CompiledSuffix {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("only the compiled file must be left, got %v", names)
+	}
+}

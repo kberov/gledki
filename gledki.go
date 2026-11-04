@@ -245,10 +245,38 @@ func (t *Gledki) loadCompiled(fullPath string) (string, error) {
 	return text, nil
 }
 
+// storeCompiled writes the compiled template `text` to the compiled file of
+// the template `fullPath` (fullPath + [CompiledSuffix]). It panics if the file
+// cannot be written.
+//
+// The file is replaced at once (atomically): `text` is first written to a new
+// temporary file in the same directory, and then the temporary file is renamed
+// to the compiled file. Writing straight into the compiled file would first
+// empty it and then fill it. Another goroutine, which reads the compiled file
+// in between (for example while serving another of the first requests after
+// the start of the application), would get an empty template without an
+// error and would render an empty page. A rename never shows a half written
+// file: a reader gets either the old file or the new one. The name of the
+// temporary file also ends with the extension of the compiled files, so
+// cleaning them (for example `rm *.htmc`) removes a temporary file, which was
+// left after a crash, too.
 func (t *Gledki) storeCompiled(fullPath, text string) {
 	// t.Logger.Debugf("storeCompiled('%s')", fullPath)
-	err := os.WriteFile(fullPath+CompiledSuffix, []byte(text), 0600)
+	compiledPath := fullPath + CompiledSuffix
+	pattern := strings.TrimSuffix(filepath.Base(fullPath), t.Ext) + ".*" + t.Ext + CompiledSuffix
+	tmp, err := os.CreateTemp(filepath.Dir(fullPath), pattern)
 	if err != nil {
+		t.Logger.Panic(err)
+	}
+	_, err = tmp.WriteString(text)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), compiledPath)
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
 		t.Logger.Panic(err)
 	}
 }
