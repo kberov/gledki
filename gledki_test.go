@@ -541,3 +541,65 @@ func filesCount(f *filesMap) (n int) {
 	})
 	return n
 }
+
+// TestCompileCacheTemplates checks that with CacheTemplates true a compiled
+// template is taken from the cache, and with CacheTemplates false (during
+// development) every change in the template files is seen at once: no
+// compiled template is taken from memory or from a .htmc file on disk, and no
+// file is taken from memory.
+func TestCompileCacheTemplates(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compile := func(tpls *Gledki) string {
+		t.Helper()
+		text, err := tpls.Compile("page")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return text
+	}
+	write("page"+filesExt, "A ${include part}")
+	write("part"+filesExt, "1")
+
+	t.Run("cached", func(t *testing.T) {
+		tpls, err := New([]string{root}, filesExt, tagsPair, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := compile(tpls); got != "A 1" {
+			t.Fatalf("first compile: got %q", got)
+		}
+		write("part"+filesExt, "2")
+		if got := compile(tpls); got != "A 1" {
+			t.Fatalf("the compiled template must be taken from the cache, got %q", got)
+		}
+	})
+
+	t.Run("not cached", func(t *testing.T) {
+		CacheTemplates = false
+		t.Cleanup(func() { CacheTemplates = true })
+		// A compiled file, left from a run with CacheTemplates true.
+		write("page"+filesExt+CompiledSuffix, "STALE")
+		write("part"+filesExt, "1")
+		tpls, err := New([]string{root}, filesExt, tagsPair, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := compile(tpls); got != "A 1" {
+			t.Fatalf("the .htmc file on disk must not be used, got %q", got)
+		}
+		write("part"+filesExt, "2")
+		if got := compile(tpls); got != "A 2" {
+			t.Fatalf("a change in an included file must be seen at once, got %q", got)
+		}
+		write("page"+filesExt, "B ${include part}")
+		if got := compile(tpls); got != "B 2" {
+			t.Fatalf("a change in the template must be seen at once, got %q", got)
+		}
+	})
+}

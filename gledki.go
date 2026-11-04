@@ -128,8 +128,14 @@ var CompiledSuffix = "c"
 
 var spf = fmt.Sprintf
 
-// CacheTemplates can be set to false to disable caching of compiled templates
-// both in memory and on disk during development.
+// CacheTemplates can be set to false to disable caching during development, so
+// that every change in a template file is seen at once. Then [Gledki.Compile]
+// compiles the template every time: it does not take the compiled template
+// from memory or from a compiled file on disk (see [CompiledSuffix]) and does
+// not store it there; [Gledki.LoadFile] reads the file every time; and the
+// full paths of the template files are not remembered. Set it once, before
+// the first template is compiled, and do not change it while templates are
+// compiled in other goroutines.
 var CacheTemplates = true
 
 /*
@@ -181,14 +187,18 @@ Compile composes a template and returns its content or an error. This means:
     loaded, wrapped (if there is a wrapper directive in them) and included
     at these places without rendering any placeholders. The inclusion
     is done recursively. See Gledki.IncludeLimit.
-  - The compiled template is kept in memory, in a private map attached to
-    *Gledki (the current instance), for subsequent use during the same run of
-    the application. If [CacheTemplates] is true, the content of the compiled
-    template is also written to disk with a suffix (see [CompiledSuffix]),
-    attached to the extension of the file, in the same directory where the
-    template file resides. Compile returns after the file is written.
-  - On the next run of the application the compiled file is simply loaded
-    and its content retuned. All the steps above are skipped.
+  - If [CacheTemplates] is true, the compiled template is kept in memory, in
+    a private map attached to *Gledki (the current instance), for subsequent
+    use during the same run of the application. It is also written to disk
+    with a suffix (see [CompiledSuffix]), attached to the extension of the
+    file, in the same directory where the template file resides. Compile
+    returns after the file is written.
+  - If CacheTemplates is true, the next call (in the same run, from memory)
+    or the next run of the application (from the compiled file on disk)
+    simply takes the compiled template. All the steps above are skipped.
+  - If CacheTemplates is false (during development), nothing is kept or
+    taken: every call compiles the template again from the files, so every
+    change in them is seen at once.
 
 Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
 included files you may need to set a bigger integer. This method is suitable
@@ -197,8 +207,10 @@ main template.
 */
 func (t *Gledki) Compile(path string) (text string, err error) {
 	path = t.toFullPath(path)
-	if text, err = t.loadCompiled(path); err == nil {
-		return text, err
+	if CacheTemplates {
+		if text, err = t.loadCompiled(path); err == nil {
+			return text, err
+		}
 	}
 	// t.Logger.Debugf("Compile('%s')", path)
 
@@ -212,8 +224,8 @@ func (t *Gledki) Compile(path string) (text string, err error) {
 	if text, err = t.include(text); err != nil {
 		return text, err
 	}
-	t.compiled.store(path, text)
 	if CacheTemplates {
+		t.compiled.store(path, text)
 		t.storeCompiled(path, text)
 	}
 	return text, err
@@ -315,20 +327,24 @@ func (t *Gledki) loadFiles() error {
 	return nil
 }
 
-// LoadFile is used to load a template from disk or from cache, if already
-// loaded before. Returns the template text or error if template cannot be
-// loaded.
+// LoadFile is used to load a template from disk or, if [CacheTemplates] is
+// true, from memory, if it was already loaded before. Returns the template
+// text or error if template cannot be loaded.
 func (t *Gledki) LoadFile(path string) (string, error) {
 	path = t.toFullPath(path)
-	if text, ok := t.files.load(path); ok && text != `` {
-		return text, nil
+	if CacheTemplates {
+		if text, ok := t.files.load(path); ok && text != `` {
+			return text, nil
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
 	text := string(data)
-	t.files.store(path, text)
+	if CacheTemplates {
+		t.files.store(path, text)
+	}
 	return text, nil
 }
 
