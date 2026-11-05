@@ -180,10 +180,11 @@ func Must(roots []string, ext string, tags [2]string, loadFiles bool) *Gledki {
 /*
 Compile composes a template and returns its content or an error. This means:
   - The file is loaded from disk using [Gledki.LoadFile] for use by
-    [Gledki.Execute].
-  - if the template contains `${wrapper some/file}`, the wrapper file is
+    any of the methods [Gledki.Execute], [Gledki.FtExec], [Gledki.FtExecStd],
+    [Gledki.FtExecString] or [Gledki.FtExecStringStd].
+  - If the template contains `${wrapper some/file}`, the wrapper file is
     wrapped around it. Only one `wrapper` directive is allowed per file.
-  - if the template contains any `${include some/file}` the files are
+  - If the template contains any `${include some/file}` the files are
     loaded, wrapped (if there is a wrapper directive in them) and included
     at these places without rendering any placeholders. The inclusion
     is done recursively. See Gledki.IncludeLimit.
