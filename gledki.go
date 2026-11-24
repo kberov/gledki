@@ -353,9 +353,11 @@ var ftExec = fasttemplate.Execute
 
 // Execute takes the compiled template of the template file `path` (making it
 // first, if needed – see [Gledki.Compile]) and executes its parsed template
-// with [fasttemplate.Template.Execute] and [Gledki.Stash]. The compiled text is
-// parsed only once, when the compiled template is made, so executing it only
-// writes the output to `w`. The path is resolved by prefixing the root folder
+// with [fasttemplate.Template.ExecuteFunc] and the values from [Gledki.Stash]
+// (see stashTagFunc in gledki_tagfunc.go). The compiled text is parsed only
+// once, when the compiled template is made, so executing it only writes the
+// output to `w`. String values are not copied, when `w` has a WriteString
+// method. The path is resolved by prefixing the root folder
 // and attaching the extension, passed to [New], if the passed path is only a
 // base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
 func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
@@ -365,7 +367,9 @@ func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return ct.tpl.Execute(w, t.Stash)
+	return ct.tpl.ExecuteFunc(w, func(w io.Writer, tag string) (int, error) {
+		return stashTagFunc(w, tag, t.Stash)
+	})
 }
 
 // FtExec replaces the placeholders in `tmpl` with the values from `data` and
