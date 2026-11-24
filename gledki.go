@@ -19,6 +19,27 @@ this wrapper.
 Ah, and „gledki(гледки)“ means "views" in Bulgarian.
 
 See the tests and sample templates for usage examples.
+
+# Terms
+
+The documentation uses these words for the different forms of a template:
+
+  - template file: a file on disk under one of the [Gledki.Roots], for
+    example `view.htm`. `path` is the path, passed to a method, for example
+    `view`; `fullPath` is the full path to the template file, found by
+    walking the Roots.
+  - template text: the content of a template file, as it is read from disk.
+  - compiled text: the text, produced from a template text by the directives
+    `wrapper` and `include`. The directives are already replaced in it; only
+    the placeholders for the values in the [Stash] are left. [Gledki.Compile]
+    returns it.
+  - compiled file: the file `fullPath` + [CompiledSuffix] (for example
+    `view.htmc`) next to the template file. It contains the compiled text.
+  - parsed template: a [fasttemplate.Template] object, made from a compiled
+    text. In it every placeholder is already found, so executing it only
+    writes the output.
+  - compiled template: the compiled text together with its parsed template,
+    kept in memory.
 */
 package gledki
 
@@ -76,11 +97,6 @@ func (f *filesMap) store(path, text string) {
 	f.m.Store(path, text)
 }
 
-// delete forgets the content for `path`.
-func (f *filesMap) delete(path string) {
-	f.m.Delete(path)
-}
-
 // Stash is an alias for `map[string]any` for replacement into templates. It
 // has the same value types' requirements as for fasttemplate:
 //   - []byte - the fastest value type;
@@ -94,8 +110,8 @@ type Gledki struct {
 	Stash Stash
 	// file name => file contents
 	files filesMap
-	// compiled templates
-	compiled filesMap
+	// compiled and parsed templates
+	compiled compiledMap
 	// File extension of the templates, for example: ".htm".
 	Ext string
 	// Root folders, where template files reside, for example
@@ -179,93 +195,124 @@ func Must(roots []string, ext string, tags [2]string, loadFiles bool) *Gledki {
 }
 
 /*
-Compile composes a template and returns its content or an error. This means:
-  - The file is loaded from disk using [Gledki.LoadFile] for use by
-    any of the methods [Gledki.Execute], [Gledki.FtExec], [Gledki.FtExecStd],
-    [Gledki.FtExecString] or [Gledki.FtExecStringStd].
-  - If the template contains `${wrapper some/file}`, the wrapper file is
-    wrapped around it. Only one `wrapper` directive is allowed per file.
-  - If the template contains any `${include some/file}` the files are
-    loaded, wrapped (if there is a wrapper directive in them) and included
-    at these places without rendering any placeholders. The inclusion
-    is done recursively. See [Gledki.IncludeLimit].
-  - If [CacheTemplates] is true, the compiled template is kept in memory, in
-    a private map attached to *Gledki (the current instance), for subsequent
-    use during the same run of the application. It is also written to disk
-    with a suffix (see [CompiledSuffix]), attached to the extension of the
-    file, in the same directory where the template file resides. Compile
-    returns after the file is written.
+Compile makes the compiled text of the template file `path` and returns it
+or an error (see Terms in the package documentation). The compiled text can
+be used by any of the methods [Gledki.FtExec], [Gledki.FtExecStd],
+[Gledki.FtExecString] or [Gledki.FtExecStringStd]. This means:
+  - The template text is read from the template file using [Gledki.LoadFile].
+  - If the template text contains `${wrapper some/file}`, the template text
+    of the wrapper file is wrapped around it. Only one `wrapper` directive is
+    allowed per template file.
+  - If the template text contains any `${include some/file}`, the template
+    texts of these files are read, wrapped (if there is a wrapper directive
+    in them) and included at these places without replacing any
+    placeholders. The inclusion is done recursively. See
+    [Gledki.IncludeLimit]. The result is the compiled text.
+  - The compiled text is parsed into a parsed template (a
+    [fasttemplate.Template] object): every placeholder is found once, so that
+    executing it later only writes the output. A start tag without an end tag
+    is an error: nothing is kept in memory and nothing is written to disk.
+  - If [CacheTemplates] is true, the compiled template (the compiled text
+    and its parsed template) is kept in memory, in a private map attached to
+    *Gledki (the current instance), for subsequent use during the same run of
+    the application. The compiled text is also written to the compiled file
+    (the template file with [CompiledSuffix] attached to its extension, in
+    the same directory). Compile returns after the compiled file is written.
   - If CacheTemplates is true, the next call (in the same run, from memory)
-    or the next run of the application (from the compiled file on disk)
-    simply takes the compiled template. All the steps above are skipped.
+    or the next run of the application (from the compiled file) simply takes
+    the compiled template. All the steps above are skipped, except that the
+    compiled text from a compiled file is parsed once. A compiled file, whose
+    compiled text cannot be parsed, is not used: the compiled text is made
+    again from the template files and the compiled file is overwritten.
   - If CacheTemplates is false (during development), nothing is kept or
-    taken: every call compiles the template again from the files, so every
-    change in them is seen at once.
+    taken: every call makes the compiled text again from the template files
+    and parses it, so every change in them is seen at once.
 
 Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
 included files you may need to set a bigger integer. This method is suitable
 for use in a ft.TagFunc to prepare parts of the output to be replaced in the
 main template.
 */
-func (t *Gledki) Compile(path string) (text string, err error) {
+func (t *Gledki) Compile(path string) (string, error) {
+	ct, err := t.compile(path)
+	if err != nil {
+		return "", err
+	}
+	return ct.text, nil
+}
+
+// compile does the work of [Gledki.Compile] and returns the compiled template
+// (the compiled text and its parsed template) of the template file `path`.
+// [Gledki.Compile] returns only the compiled text; [Gledki.Execute] executes
+// the parsed template.
+func (t *Gledki) compile(path string) (ct *compiledTemplate, err error) {
 	path = t.toFullPath(path)
 	if CacheTemplates {
-		if text, err = t.loadCompiled(path); err == nil {
-			return text, err
+		if ct, err = t.loadCompiled(path); err == nil {
+			return ct, nil
 		}
 	}
-	// t.Logger.Debugf("Compile('%s')", path)
+	// t.Logger.Debugf("compile('%s')", path)
 
+	var text string
 	if text, err = t.LoadFile(path); err != nil {
-		return text, err
+		return nil, err
 	}
 	// TODO: Remove the spaces between the tags and their content before
 	// all other directives, so `${ include some/file }` works too. The
 	// wrapper and included files need the same, so maybe in LoadFile.
 	if text, err = t.wrap(text); err != nil {
-		return text, err
+		return nil, err
 	}
 
 	if text, err = t.include(text); err != nil {
-		return text, err
+		return nil, err
 	}
 	// TODO: Remove comments like `${# ...}` and prepare dot notations like
 	// `${keyFromStash.Property}` and `${execute path/to/file}`. Decide how
 	// dot notations and execute are resolved – at compile time (a private
 	// stash of the file) or at execution time.
+	if ct, err = t.parse(path, text); err != nil {
+		return nil, err
+	}
 	if CacheTemplates {
-		t.compiled.store(path, text)
+		t.compiled.store(path, ct)
 		t.storeCompiled(path, text)
 	}
-	return text, err
+	return ct, nil
 }
 
-// loadCompiled returns the compiled template `fullPath` with a nil error. It
-// takes it from memory, if it is there. Otherwise it loads the compiled file
-// from disk (fullPath + [CompiledSuffix]) and keeps it in memory for the next
-// call. If an error occurs during loading it returns an empty string and an
-// error. TODO: Decide whether the compiled file has to contain also a private
-// stash of the template (for example as a gob), which is merged at execution
-// time with the Stash used to execute and render the template.
-func (t *Gledki) loadCompiled(fullPath string) (string, error) {
-	if text, ok := t.compiled.load(fullPath); ok {
-		return text, nil
+// loadCompiled returns the compiled template of the template file `fullPath`
+// with a nil error. It takes it from memory, if it is there. Otherwise it
+// reads the compiled text from the compiled file (fullPath +
+// [CompiledSuffix]), parses it into a parsed template and keeps both in
+// memory for the next call. If the compiled file cannot be read or its
+// compiled text cannot be parsed, it returns nil and the error.
+// TODO: Decide whether the compiled file has to contain also a private stash
+// of the template (for example as a gob), which is merged at execution time
+// with the Stash used to execute and render the template.
+func (t *Gledki) loadCompiled(fullPath string) (*compiledTemplate, error) {
+	if ct, ok := t.compiled.load(fullPath); ok {
+		return ct, nil
 	}
 	// t.Logger.Debugf("loadCompiled('%s')", fullPath)
 	data, err := os.ReadFile(fullPath + CompiledSuffix)
 	if err != nil {
-		return "", fmt.Errorf("compiled file: %v", err)
+		return nil, fmt.Errorf("compiled file: %v", err)
 	}
 	// TODO: Changes for how compiled files are kept in memory, depending on
 	// the changed file format, go here.
-	text := string(data)
-	t.compiled.store(fullPath, text)
-	return text, nil
+	ct, err := t.parse(fullPath+CompiledSuffix, string(data))
+	if err != nil {
+		return nil, err
+	}
+	t.compiled.store(fullPath, ct)
+	return ct, nil
 }
 
-// storeCompiled writes the compiled template `text` to the compiled file of
-// the template `fullPath` (fullPath + [CompiledSuffix]). It panics if the file
-// cannot be written.
+// storeCompiled writes the compiled text `text` to the compiled file of the
+// template file `fullPath` (fullPath + [CompiledSuffix]). It panics if the
+// compiled file cannot be written.
 //
 // The file is replaced at once (atomically): `text` is first written to a new
 // temporary file in the same directory, and then the temporary file is renamed
@@ -304,19 +351,21 @@ func (t *Gledki) storeCompiled(fullPath, text string) {
 
 var ftExec = fasttemplate.Execute
 
-// Execute compiles (if needed) and executes the passed template using
-// [fasttemplate.Execute]. The path is resolved by prefixing the root folder
-// and attaching the extension, passed to [New], if the passed file is only a
+// Execute takes the compiled template of the template file `path` (making it
+// first, if needed – see [Gledki.Compile]) and executes its parsed template
+// with [fasttemplate.Template.Execute] and [Gledki.Stash]. The compiled text is
+// parsed only once, when the compiled template is made, so executing it only
+// writes the output to `w`. The path is resolved by prefixing the root folder
+// and attaching the extension, passed to [New], if the passed path is only a
 // base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
 func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 	defer clear(t.Stash)
 
-	text, err := t.Compile(path)
+	ct, err := t.compile(path)
 	if err != nil {
 		return 0, err
 	}
-	length, err := ftExec(text, t.Tags[0], t.Tags[1], w, t.Stash)
-	return length, err
+	return ct.tpl.Execute(w, t.Stash)
 }
 
 // FtExec replaces the placeholders in `tmpl` with the values from `data` and

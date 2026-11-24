@@ -267,7 +267,7 @@ func TestOtherPanics(t *testing.T) {
 	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	path := "/ff/a.htm"
-	tpls.compiled.store(path, "bla")
+	tpls.compiled.store(path, &compiledTemplate{text: "bla"})
 	expectPanic(t, func() { tpls.storeCompiled(path, "bla") })
 	expectPanic(t, func() { tpls.MustLoadFile(path) })
 	expectPanic(t, func() { Must([]string{"/aaa/bbb"}, filesExt, tagsPair, false) })
@@ -636,43 +636,5 @@ func TestStoreCompiledReplacesAtOnce(t *testing.T) {
 			names = append(names, e.Name())
 		}
 		t.Fatalf("only the compiled file must be left, got %v", names)
-	}
-}
-
-// BenchmarkExecute measures [Gledki.Execute] of an already compiled template
-// with one included file and 21 placeholders. The template is compiled before
-// the loop, so only the execution is measured. The stash is filled again in
-// every iteration, because Execute clears it.
-func BenchmarkExecute(b *testing.B) {
-	root := b.TempDir()
-	keys := make([]string, 20)
-	var page strings.Builder
-	page.WriteString("${include part}\n")
-	for i := range keys {
-		keys[i] = fmt.Sprintf("k%d", i)
-		page.WriteString("<p>${" + keys[i] + "}</p>\n")
-	}
-	files := map[string]string{"page": page.String(), "part": "<h1>${title}</h1>"}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(root, name+filesExt), []byte(content), 0o600); err != nil {
-			b.Fatal(err)
-		}
-	}
-	tpls, err := New([]string{root}, filesExt, tagsPair, false)
-	if err != nil {
-		b.Fatal(err)
-	}
-	if _, err = tpls.Execute(io.Discard, "page"); err != nil {
-		b.Fatal(err)
-	}
-	b.ReportAllocs()
-	for b.Loop() {
-		tpls.Stash["title"] = "T"
-		for i := range keys {
-			tpls.Stash[keys[i]] = "v"
-		}
-		if _, err := tpls.Execute(io.Discard, "page"); err != nil {
-			b.Fatal(err)
-		}
 	}
 }
