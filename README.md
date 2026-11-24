@@ -39,7 +39,7 @@ var filesExt = ".htm"
 
 //...
 
-// Once on startup.
+// Once on startup. One Gledki for the whole application.
 tpls, err := gl.New(templatesRoots, filesExt, [2]string{"<%", "%>"}, false)
 if err != nil {
 	fmt.Print("Error:", err.Error())
@@ -47,23 +47,18 @@ if err != nil {
 }
 tpls.Logger.SetLevel(log.DEBUG)
 // …
-// Later… many times and with various data (string, []byte, gledki.TagFunc)
-tpls.Stash = map[string]any{"generator": "Гледки"}
-
-// Somwhere else in your program…
-tpls.MergeStash(gl.Stash{
-	"title": "Hello",
-	"body": gl.TagFunc(func(w io.Writer, tag string) (int, error) {
-		// tmpls.Stash entries and even the entire Stash can be modified
-		// from within tmpls.TagFunc
-		tpls.Stash["generator"] = "Something"
-		return w.Write([]byte("<p>Some complex callculations to construct the body.</p>"))
-	}),
+// Later… many times, for example in every HTTP request, each in its own
+// goroutine and with its own stash (string, []byte, gledki.TagFunc).
+stash := gl.Stash{"generator": "Гледки", "title": "Hello"}
+stash["body"] = gl.TagFunc(func(w io.Writer, _ string) (int, error) {
+	// Entries of the stash of this execution can be changed from within
+	// a TagFunc.
+	stash["generator"] = "Something"
+	return w.Write([]byte("<p>Some complex callculations to construct the body.</p>"))
 })
 
-// Even later…
 // See used templates in testdata/tpls.
-tpls.Execute(os.Stdout, "simple")
+tpls.Exec(os.Stdout, "simple", stash)
 // Output:
 // <!doctype html>
 // <html>
@@ -84,7 +79,12 @@ tpls.Execute(os.Stdout, "simple")
 // </html>
 ```
 
-See other examples in gledki_test.go.
+See other examples in examples_test.go.
+
+`Exec` does not use the shared `Gledki.Stash`, so one Gledki can be used by
+many goroutines at the same time. `Gledki.Stash`, `MergeStash` and `Execute`
+are deprecated: in v0.8.0 `Execute` takes the stash as an argument, like
+`Exec`, and `Gledki.Stash`, `MergeStash` and `Exec` are removed.
 
 # TODO (May be some day...)
 

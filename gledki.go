@@ -106,7 +106,11 @@ type Stash = map[string]any
 
 // Gledki manages files and data for fasttemplate.
 type Gledki struct {
-	// A map for replacement into templates
+	// A map for replacement into templates by [Gledki.Execute].
+	//
+	// Deprecated: The Stash is shared by all goroutines, which use this
+	// Gledki, so it cannot be used by many of them at the same time. Pass a
+	// Stash to [Gledki.Exec] instead. Removed in v0.8.0.
 	Stash Stash
 	// file name => file contents
 	files filesMap
@@ -367,23 +371,18 @@ var ftExec = fasttemplate.Execute
 
 // Execute takes the compiled template of the template file `path` (making it
 // first, if needed – see [Gledki.Compile]) and executes its parsed template
-// with [fasttemplate.Template.ExecuteFunc] and the values from [Gledki.Stash]
-// (see stashTagFunc in gledki_tagfunc.go). The compiled text is parsed only
-// once, when the compiled template is made, so executing it only writes the
-// output to `w`. String values are not copied, when `w` has a WriteString
-// method. The path is resolved by prefixing the root folder
-// and attaching the extension, passed to [New], if the passed path is only a
-// base name. Example: `path := "view"` => `/home/user/app/templates/view.htm`.
+// with the values from [Gledki.Stash] and clears Gledki.Stash afterwards.
+//
+// The path is resolved by prefixing the root folder and attaching the
+// extension, passed to [New], if the passed path is only a base name. Example:
+// `path := "view"` => `/home/user/app/templates/view.htm`.
+//
+// Deprecated: Execute uses the shared [Gledki.Stash], so it cannot be used by
+// many goroutines at the same time. In v0.8.0 Execute takes the stash as an
+// argument, like [Gledki.Exec]. Until then use Exec.
 func (t *Gledki) Execute(w io.Writer, path string) (int64, error) {
 	defer clear(t.Stash)
-
-	ct, err := t.compile(path)
-	if err != nil {
-		return 0, err
-	}
-	return ct.tpl.ExecuteFunc(w, func(w io.Writer, tag string) (int, error) {
-		return stashTagFunc(w, tag, t.Stash)
-	})
+	return t.Exec(w, path, t.Stash)
 }
 
 // FtExec replaces the placeholders in `tmpl` with the values from `data` and
@@ -514,9 +513,12 @@ func (t *Gledki) toFullPath(path string) string {
 	return path
 }
 
-// MergeStash adds entries into the [Stash], used by
-// [fasttemplate.Execute] in [Gledki.Execute]. If entries with the same key
-// exist, they will be overridden with the new values.
+// MergeStash adds entries into [Gledki.Stash], used by [Gledki.Execute]. If
+// entries with the same key exist, they will be overridden with the new
+// values.
+//
+// Deprecated: Gledki.Stash is shared by all goroutines, which use this
+// Gledki. Pass a Stash to [Gledki.Exec] instead. Removed in v0.8.0.
 func (t *Gledki) MergeStash(data Stash) {
 	maps.Copy(t.Stash, data)
 }

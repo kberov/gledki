@@ -97,3 +97,43 @@ func ExampleGledki_Execute_simple() {
 	//     </body>
 	// </html>
 }
+
+func ExampleGledki_Exec() {
+	// Once on startup. One Gledki for the whole application.
+	tpls, err := gl.New(Roots, filesExt, [2]string{"<%", "%>"}, false)
+	if err != nil {
+		fmt.Print("Error:", err.Error())
+		os.Exit(1)
+	}
+
+	// Later… many times, for example in every HTTP request, each in its own
+	// goroutine and with its own stash (string, []byte, gledki.TagFunc).
+	stash := gl.Stash{"generator": "Гледки", "title": "Hello"}
+	stash["body"] = gl.TagFunc(func(w io.Writer, _ string) (int, error) {
+		// Entries of the stash of this execution can be changed from within
+		// a TagFunc.
+		stash["generator"] = "Something"
+		return w.Write([]byte("<p>Some complex callculations to construct the body.</p>"))
+	})
+
+	// See used templates in testdata/tpls.
+	_, _ = tpls.Exec(os.Stdout, "simple", stash)
+	// Output:
+	// <!doctype html>
+	// <html>
+	//     <head>
+	//         <meta charset="UTF-8">
+	//         <meta name="generator" content="Гледки">
+	//         <title>Hello</title>
+	//     </head>
+	//     <body>
+	//         <header><h1>Hello</h1></header>
+	//         <h1>Hello</h1>
+	//         <section>
+	//             <p>Some complex callculations to construct the body.</p>
+	//             <p>Changed generator to "Something".</p>
+	//         </section>
+	//         <footer>Тази страница бе създадена с Something.</footer>
+	//     </body>
+	// </html>
+}

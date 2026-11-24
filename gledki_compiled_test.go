@@ -2,7 +2,6 @@ package gledki
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -138,29 +137,7 @@ func TestExecuteCacheTemplatesFalse(t *testing.T) {
 // the loop, so only the execution is measured. The stash is filled again in
 // every iteration, because Execute clears it.
 func BenchmarkExecute(b *testing.B) {
-	root := b.TempDir()
-	keys := make([]string, 20)
-	var page strings.Builder
-	page.WriteString("${include part}\n")
-	for i := range keys {
-		keys[i] = fmt.Sprintf("k%d", i)
-		page.WriteString("<p>${")
-		page.WriteString(keys[i])
-		page.WriteString("}</p>\n")
-	}
-	files := map[string]string{"page": page.String(), "part": "<h1>${title}</h1>"}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(root, name+filesExt), []byte(content), 0o600); err != nil {
-			b.Fatal(err)
-		}
-	}
-	tpls, err := New([]string{root}, filesExt, tagsPair, false)
-	if err != nil {
-		b.Fatal(err)
-	}
-	if _, err = tpls.Execute(io.Discard, "page"); err != nil {
-		b.Fatal(err)
-	}
+	tpls, keys := benchTemplate(b)
 	b.ReportAllocs()
 	for b.Loop() {
 		tpls.Stash["title"] = "T"
