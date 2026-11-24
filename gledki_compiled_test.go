@@ -172,3 +172,21 @@ func BenchmarkExecute(b *testing.B) {
 		}
 	}
 }
+
+// TestMustCompile checks that MustCompile returns the compiled text and
+// panics on any error, so that a broken template is seen at once during
+// development.
+func TestMustCompile(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"page.htm": "<p>${title}</p>",
+		"bad.htm":  "<p>${title</p>",
+	})
+
+	tpls := newIn(t, root, tagsPair)
+	if got := tpls.MustCompile("page"); got != "<p>${title}</p>" {
+		t.Fatalf("got %q", got)
+	}
+	expectPanic(t, func() { tpls.MustCompile("bad") })
+	expectPanic(t, func() { tpls.MustCompile("nosuchfile") })
+}

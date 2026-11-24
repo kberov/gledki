@@ -241,6 +241,20 @@ func (t *Gledki) Compile(path string) (string, error) {
 	return ct.text, nil
 }
 
+/*
+MustCompile does the same as [Gledki.Compile], but panics in case of any
+error: a template file, which cannot be read, or a compiled text, which
+cannot be parsed (a start tag without an end tag). Use it during development
+or at the start of the application to see at once that a template is broken.
+*/
+func (t *Gledki) MustCompile(path string) string {
+	text, err := t.Compile(path)
+	if err != nil {
+		t.Logger.Panic(err)
+	}
+	return text
+}
+
 // compile does the work of [Gledki.Compile] and returns the compiled template
 // (the compiled text and its parsed template) of the template file `path`.
 // [Gledki.Compile] returns only the compiled text; [Gledki.Execute] executes
