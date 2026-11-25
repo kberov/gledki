@@ -2,6 +2,7 @@ package gledki
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/valyala/fasttemplate"
@@ -10,11 +11,20 @@ import (
 // compiledTemplate is a compiled template (see Terms in the package
 // documentation): the compiled text and its parsed template. The parsing
 // (finding every placeholder) is done only once per template file, so that
-// [Gledki.Execute] only writes the output. The parsed template does not copy
-// the compiled text: its parts are parts of the compiled text.
+// executing it ([Gledki.Exec]) only writes the output. The parsed template
+// does not copy the compiled text: its parts are parts of the compiled text.
+//
+// If a start tag has no end tag, the compiled text cannot be parsed. Then
+// `tpl` is nil and the compiled text is executed as in v0.7.8, without
+// parsing it in advance: such a start tag is written as it is.
 type compiledTemplate struct {
 	text string
 	tpl  *fasttemplate.Template
+	// tagErr is the first start tag without an end tag, found in the
+	// template texts while compiling, with the template file and the line.
+	// It is nil, when the compiled template is taken from a compiled file,
+	// which can be parsed.
+	tagErr error
 }
 
 // compiledMap keeps the compiled templates by the full path of their template
@@ -29,16 +39,16 @@ type compiledMap struct {
 // load returns the compiled template stored for `path` and true, or nil and
 // false if nothing is stored for it.
 func (c *compiledMap) load(path string) (*compiledTemplate, bool) {
-	ct, ok := c.m.Load(path)
+	compiledT, ok := c.m.Load(path)
 	if !ok {
 		return nil, false
 	}
-	return ct.(*compiledTemplate), true
+	return compiledT.(*compiledTemplate), true
 }
 
-// store keeps `ct` as the compiled template for `path`.
-func (c *compiledMap) store(path string, ct *compiledTemplate) {
-	c.m.Store(path, ct)
+// store keeps `compiledT` as the compiled template for `path`.
+func (c *compiledMap) store(path string, compiledT *compiledTemplate) {
+	c.m.Store(path, compiledT)
 }
 
 // delete forgets the compiled template for `path`.
@@ -47,14 +57,46 @@ func (c *compiledMap) delete(path string) {
 }
 
 // parse parses the compiled text `text` into a parsed template with the
-// [Gledki.Tags] of this instance and returns both as a compiled template.
-// `fullPath` is the template file or the compiled file, from which `text`
-// comes; it is used only in the error message. It returns an error, if a
-// start tag has no end tag.
-func (t *Gledki) parse(fullPath, text string) (*compiledTemplate, error) {
-	tpl, err := fasttemplate.NewTemplate(text, t.Tags[0], t.Tags[1])
-	if err != nil {
-		return nil, fmt.Errorf("template %s: %w", fullPath, err)
+// [Gledki.Tags] of this instance and returns both as a compiled template. If a
+// start tag has no end tag, the parsed template is nil.
+func (t *Gledki) parse(text string) *compiledTemplate {
+	compiledT := &compiledTemplate{text: text}
+	if tpl, err := fasttemplate.NewTemplate(text, t.Tags[0], t.Tags[1]); err == nil {
+		compiledT.tpl = tpl
 	}
-	return &compiledTemplate{text: text, tpl: tpl}, nil
+	return compiledT
+}
+
+// tagCheck keeps the first start tag without an end tag, found in the
+// template texts of one compilation (the main template file, its wrapper and
+// the included files). One tagCheck is used by one compilation only.
+type tagCheck struct {
+	err error
+}
+
+// check looks in the template text `text` of the template file `fullPath`
+// for a start tag without an end tag. A start tag is without an end tag also
+// when another start tag comes before its end tag (`a ${x b ${y}`): then
+// fasttemplate would take `x b ${y` as the name of one placeholder. Only the
+// first such start tag of a compilation is kept.
+func (tCheck *tagCheck) check(t *Gledki, fullPath, text string) {
+	if tCheck.err != nil {
+		return
+	}
+	start, end := t.Tags[0], t.Tags[1]
+	for offset := 0; ; {
+		i := strings.Index(text[offset:], start)
+		if i < 0 {
+			return
+		}
+		i += offset
+		rest := text[i+len(start):]
+		j := strings.Index(rest, end)
+		if j < 0 || strings.Contains(rest[:j], start) {
+			tCheck.err = fmt.Errorf("template file %s, line %d: start tag %q without end tag",
+				fullPath, 1+strings.Count(text[:i], "\n"), start)
+			return
+		}
+		offset = i + len(start) + j + len(end)
+	}
 }

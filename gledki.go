@@ -214,8 +214,14 @@ be used by any of the methods [Gledki.FtExec], [Gledki.FtExecStd],
     [Gledki.IncludeLimit]. The result is the compiled text.
   - The compiled text is parsed into a parsed template (a
     [fasttemplate.Template] object): every placeholder is found once, so that
-    executing it later only writes the output. A start tag without an end tag
-    is an error: nothing is kept in memory and nothing is written to disk.
+    executing it later only writes the output.
+  - Every template text (of the template file, of its wrapper and of the
+    included files) is checked for a start tag without an end tag, also one
+    followed by another start tag before the next end tag. The first one is
+    logged as a warning with the template file and the line, and
+    [Gledki.MustCompile] panics with it. As in v0.7.8 it is not an error:
+    when the compiled text cannot be parsed, it is executed without parsing
+    it in advance and such a start tag is written as it is.
   - If [CacheTemplates] is true, the compiled template (the compiled text
     and its parsed template) is kept in memory, in a private map attached to
     *Gledki (the current instance), for subsequent use during the same run of
@@ -227,7 +233,10 @@ be used by any of the methods [Gledki.FtExec], [Gledki.FtExecStd],
     the compiled template. All the steps above are skipped, except that the
     compiled text from a compiled file is parsed once. A compiled file, whose
     compiled text cannot be parsed, is not used: the compiled text is made
-    again from the template files and the compiled file is overwritten.
+    again from the template files (so that the template file with the start
+    tag without an end tag is reported) and the compiled file is overwritten.
+    Then the compiled template is kept in memory, so the compiled file is not
+    read again in the same run.
   - If CacheTemplates is false (during development), nothing is kept or
     taken: every call makes the compiled text again from the template files
     and parses it, so every change in them is seen at once.
@@ -238,36 +247,41 @@ for use in a ft.TagFunc to prepare parts of the output to be replaced in the
 main template.
 */
 func (t *Gledki) Compile(path string) (string, error) {
-	ct, err := t.compile(path)
+	compiledT, err := t.compile(path)
 	if err != nil {
 		return "", err
 	}
-	return ct.text, nil
+	return compiledT.text, nil
 }
 
 /*
 MustCompile does the same as [Gledki.Compile], but panics in case of any
-error: a template file, which cannot be read, or a compiled text, which
-cannot be parsed (a start tag without an end tag). Use it during development
-or at the start of the application to see at once that a template is broken.
+error: a template file, which cannot be read, or a start tag without an end
+tag in one of the template texts. The panic message names the template file
+and the line of the start tag. Use it during development (with
+[CacheTemplates] false, so that every template file is checked) or at the
+start of the application to see at once that a template is broken.
 */
 func (t *Gledki) MustCompile(path string) string {
-	text, err := t.Compile(path)
+	compiledT, err := t.compile(path)
+	if err == nil {
+		err = compiledT.tagErr
+	}
 	if err != nil {
 		t.Logger.Panic(err)
 	}
-	return text
+	return compiledT.text
 }
 
 // compile does the work of [Gledki.Compile] and returns the compiled template
 // (the compiled text and its parsed template) of the template file `path`.
 // [Gledki.Compile] returns only the compiled text; [Gledki.Execute] executes
 // the parsed template.
-func (t *Gledki) compile(path string) (ct *compiledTemplate, err error) {
+func (t *Gledki) compile(path string) (compiledT *compiledTemplate, err error) {
 	path = t.toFullPath(path)
 	if CacheTemplates {
-		if ct, err = t.loadCompiled(path); err == nil {
-			return ct, nil
+		if compiledT, err = t.loadCompiled(path); err == nil {
+			return compiledT, nil
 		}
 	}
 	// t.Logger.Debugf("compile('%s')", path)
@@ -276,28 +290,35 @@ func (t *Gledki) compile(path string) (ct *compiledTemplate, err error) {
 	if text, err = t.LoadFile(path); err != nil {
 		return nil, err
 	}
+	tCheck := &tagCheck{}
+	tCheck.check(t, path, text)
 	// TODO: Remove the spaces between the tags and their content before
 	// all other directives, so `${ include some/file }` works too. The
 	// wrapper and included files need the same, so maybe in LoadFile.
-	if text, err = t.wrap(text); err != nil {
+	if text, err = t.wrap(text, tCheck); err != nil {
 		return nil, err
 	}
 
-	if text, err = t.include(text); err != nil {
+	if text, err = t.include(text, tCheck); err != nil {
 		return nil, err
 	}
 	// TODO: Remove comments like `${# ...}` and prepare dot notations like
 	// `${keyFromStash.Property}` and `${execute path/to/file}`. Decide how
 	// dot notations and execute are resolved – at compile time (a private
 	// stash of the file) or at execution time.
-	if ct, err = t.parse(path, text); err != nil {
-		return nil, err
+	compiledT = t.parse(text)
+	compiledT.tagErr = tCheck.err
+	if compiledT.tpl == nil && compiledT.tagErr == nil {
+		compiledT.tagErr = fmt.Errorf("template file %s: start tag %q without end tag", path, t.Tags[0])
+	}
+	if compiledT.tagErr != nil {
+		t.Logger.Warn(compiledT.tagErr)
 	}
 	if CacheTemplates {
-		t.compiled.store(path, ct)
+		t.compiled.store(path, compiledT)
 		t.storeCompiled(path, text)
 	}
-	return ct, nil
+	return compiledT, nil
 }
 
 // loadCompiled returns the compiled template of the template file `fullPath`
@@ -310,8 +331,8 @@ func (t *Gledki) compile(path string) (ct *compiledTemplate, err error) {
 // of the template (for example as a gob), which is merged at execution time
 // with the Stash used to execute and render the template.
 func (t *Gledki) loadCompiled(fullPath string) (*compiledTemplate, error) {
-	if ct, ok := t.compiled.load(fullPath); ok {
-		return ct, nil
+	if compiledT, ok := t.compiled.load(fullPath); ok {
+		return compiledT, nil
 	}
 	// t.Logger.Debugf("loadCompiled('%s')", fullPath)
 	data, err := os.ReadFile(fullPath + CompiledSuffix)
@@ -320,12 +341,15 @@ func (t *Gledki) loadCompiled(fullPath string) (*compiledTemplate, error) {
 	}
 	// TODO: Changes for how compiled files are kept in memory, depending on
 	// the changed file format, go here.
-	ct, err := t.parse(fullPath+CompiledSuffix, string(data))
-	if err != nil {
-		return nil, err
+	compiledT := t.parse(string(data))
+	if compiledT.tpl == nil {
+		// Compile it again from the template files, so that the template
+		// file with the start tag without an end tag is reported.
+		return nil, fmt.Errorf("compiled file %s: start tag %q without end tag",
+			fullPath+CompiledSuffix, t.Tags[0])
 	}
-	t.compiled.store(fullPath, ct)
-	return ct, nil
+	t.compiled.store(fullPath, compiledT)
+	return compiledT, nil
 }
 
 // storeCompiled writes the compiled text `text` to the compiled file of the
@@ -583,7 +607,7 @@ func isReadable(path string) bool {
 // the contents of the partial templates. Panics in case the
 // [Gledki.IncludeLimit] is reached. If you have deeply nested included files
 // you may need to set a bigger integer.
-func (t *Gledki) include(text string) (string, error) {
+func (t *Gledki) include(text string, tCheck *tagCheck) (string, error) {
 	re := t.res["include"]
 	matches := re.FindAllStringSubmatch(text, -1)
 	howMany := len(matches)
@@ -601,11 +625,12 @@ func (t *Gledki) include(text string) (string, error) {
 				t.Logger.Warnf("err:%s", err.Error())
 				return "", err
 			}
-			includedFileContent, err = t.wrap(strings.TrimSuffix(includedFileContent, "\n"))
+			tCheck.check(t, t.toFullPath(m[2]), includedFileContent)
+			includedFileContent, err = t.wrap(strings.TrimSuffix(includedFileContent, "\n"), tCheck)
 			if err != nil {
 				return "", err
 			}
-			stash[m[1]], err = t.include(includedFileContent)
+			stash[m[1]], err = t.include(includedFileContent, tCheck)
 			if err != nil {
 				return "", err
 			}
@@ -622,7 +647,7 @@ func (t *Gledki) include(text string) (string, error) {
 // `content` placeholder is special in wrapper templates and cannot be used as
 // a regular placeholder. Only one `wrapper` directive is allowed per file.
 // Returns the wrapped template text or the passed text with error.
-func (t *Gledki) wrap(text string) (string, error) {
+func (t *Gledki) wrap(text string, tCheck *tagCheck) (string, error) {
 	text = strings.TrimSuffix(text, "\n")
 	re := t.res["wrap"]
 	// allow only one wrapper
@@ -633,6 +658,7 @@ func (t *Gledki) wrap(text string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		tCheck.check(t, t.toFullPath(string(match[2])), wrapperFile)
 		wrapperFile = strings.TrimSuffix(wrapperFile, "\n")
 		// remove the matched m[1] from text
 		text = strings.Replace(text, match[1], "", 1)

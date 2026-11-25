@@ -1,12 +1,13 @@
 package gledki
 
 import (
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/labstack/gommon/log"
 )
 
 // TestExecuteKeepsParsedTemplate checks that the parsed template is kept in
@@ -19,53 +20,74 @@ func TestExecuteKeepsParsedTemplate(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 	fullPath := tpls.toFullPath("page")
-	ct1, ok := tpls.compiled.load(fullPath)
-	if !ok || ct1.tpl == nil {
-		t.Fatalf("no parsed template in memory: %v %#v", ok, ct1)
+	compiledT1, ok := tpls.compiled.load(fullPath)
+	if !ok || compiledT1.tpl == nil {
+		t.Fatalf("no parsed template in memory: %v %#v", ok, compiledT1)
 	}
 	if got := execute(t, tpls, "page", Stash{"title": "B"}); got != "<p>B</p>" {
 		t.Fatalf("got %q", got)
 	}
-	if ct2, _ := tpls.compiled.load(fullPath); ct1 != ct2 {
+	if compiledT2, _ := tpls.compiled.load(fullPath); compiledT1 != compiledT2 {
 		t.Fatal("the parsed template must be reused")
 	}
 	tpls.compiled.delete(fullPath)
 	if got := execute(t, tpls, "page", Stash{"title": "C"}); got != "<p>C</p>" {
 		t.Fatalf("from the compiled file: got %q", got)
 	}
-	if ct3, ok := tpls.compiled.load(fullPath); !ok || ct3.tpl == nil {
+	if compiledT3, ok := tpls.compiled.load(fullPath); !ok || compiledT3.tpl == nil {
 		t.Fatal("the compiled file must be parsed and kept in memory")
 	}
 }
 
-// TestCompileUnclosedTag checks that a start tag without an end tag is an
-// error at compile time and nothing is stored.
+// TestCompileUnclosedTag checks that a start tag without an end tag works as
+// in v0.7.8 (it is written as it is), but is reported with the template file
+// and the line, where it is: as a warning by Compile and as a panic by
+// MustCompile.
 func TestCompileUnclosedTag(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
-		"page.htm": "<p>${title</p>",
-		"main.htm": "A ${include bad}",
+		"page.htm": "Price ${x}\n<script>var a = \"${\";</script>",
+		"main.htm": "A ${include bad} B ${y}",
 		"bad.htm":  "${x",
+		"same.htm": "a ${x b ${y}",
 	})
 	tpls := newIn(t, root, tagsPair)
+	var logged strings.Builder
+	tpls.Logger = log.New("test")
+	tpls.Logger.SetOutput(&logged)
+	tpls.Logger.SetLevel(log.WARN)
+
 	text, err := tpls.Compile("page")
-	if err == nil || text != "" {
-		t.Fatalf("expected an error and no text, got %q, %v", text, err)
+	if err != nil || text != "Price ${x}\n<script>var a = \"${\";</script>" {
+		t.Fatalf("Compile: got %q, %v", text, err)
 	}
-	fullPath := tpls.toFullPath("page")
-	if _, err := os.Stat(fullPath + CompiledSuffix); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("no compiled file must be written: %v", err)
-	}
-	if _, ok := tpls.compiled.load(fullPath); ok {
-		t.Fatal("nothing must be kept in memory")
+	if want := "page.htm, line 2: start tag"; !strings.Contains(logged.String(), want) {
+		t.Errorf("the warning must contain %q, got %q", want, logged.String())
 	}
 	var out strings.Builder
-	if _, err := tpls.Execute(&out, "page"); err == nil {
-		t.Fatal("Execute: expected an error")
+	if _, err := tpls.Exec(&out, "page", Stash{"x": "1"}); err != nil ||
+		out.String() != "Price 1\n<script>var a = \"${\";</script>" {
+		t.Fatalf("Exec: got %q, %v", out.String(), err)
 	}
+	if compiledT, ok := tpls.compiled.load(tpls.toFullPath("page")); !ok || compiledT.tpl != nil {
+		t.Fatal("the compiled template without a parsed template must be kept in memory")
+	}
+	if msg := panicMessage(func() { tpls.MustCompile("page") }); !strings.Contains(msg, "page.htm, line 2") {
+		t.Errorf("MustCompile must panic with the file and the line, got %q", msg)
+	}
+
 	t.Run("in included file", func(t *testing.T) {
-		if _, err := tpls.Compile("main"); err == nil {
-			t.Fatal("expected an error")
+		if msg := panicMessage(func() { tpls.MustCompile("main") }); !strings.Contains(msg, "bad.htm, line 1") {
+			t.Errorf("MustCompile must name the included file, got %q", msg)
+		}
+		out.Reset()
+		if _, err := tpls.Exec(&out, "main", Stash{"x": "1", "y": "2"}); err != nil || out.String() != "A " {
+			t.Fatalf("Exec must work as in v0.7.8, got %q, %v", out.String(), err)
+		}
+	})
+	t.Run("end tag of a later tag", func(t *testing.T) {
+		if msg := panicMessage(func() { tpls.MustCompile("same") }); !strings.Contains(msg, "same.htm, line 1") {
+			t.Errorf("MustCompile must find it, got %q", msg)
 		}
 	})
 }

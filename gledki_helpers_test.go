@@ -66,3 +66,15 @@ func benchTemplate(b *testing.B) (*Gledki, []string) {
 	}
 	return tpls, keys
 }
+
+// panicMessage calls f and returns the message of its panic, or "" if f does
+// not panic.
+func panicMessage(f func()) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	f()
+	return ""
+}
