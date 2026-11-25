@@ -36,7 +36,7 @@ func ExampleNew() {
 	//	Stash: map[string]interface {}{}
 	//	Ext: ".htm"
 	//	Tags: [2]string{"${", "}"}
-	//	IncludeLimit: 3 (default)
+	//	IncludeLimit: 4 (default)
 	//	Logger: *log.Logger from "github.com/labstack/gommon/log"
 }
 

@@ -259,6 +259,8 @@ func TestIncludeLimitPanic(t *testing.T) {
 		level++
 		return w.Write([]byte(spf("%d", level)))
 	})
+	// includes.htm includes partials/level4 at depth 4.
+	tpls.IncludeLimit = 3
 	var out strings.Builder
 	expectPanic(t, func() { _, _ = tpls.Execute(&out, "includes.htm") })
 }
@@ -267,7 +269,7 @@ func TestOtherPanics(t *testing.T) {
 	setVerboseLoggerOnce()
 	tpls, _ := New(includePaths, filesExt, tagsPair, false)
 	path := "/ff/a.htm"
-	tpls.compiled.store(path, &compiledTemplate{text: "bla"})
+	tpls.compiled.store(path, tpls.parse("bla"))
 	expectPanic(t, func() { tpls.storeCompiled(path, "bla") })
 	expectPanic(t, func() { tpls.MustLoadFile(path) })
 	expectPanic(t, func() { Must([]string{"/aaa/bbb"}, filesExt, tagsPair, false) })

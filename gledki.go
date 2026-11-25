@@ -1,13 +1,15 @@
 /*
-Package gledki provides a templates, data manager and preprocessor for
+Package gledki provides a templates and data manager, and a preprocessor for
 [fasttemplate].
 
 Because fasttemplate is minimalistic, the need for this wrapper arose. Two
 template directives were implemented – `wrapper` and `include`. They make
 [gledki] powerful enough for use in big and complex web applications.
+Comments `${# …}` are removed when a template is compiled; a line with only
+comments is removed entirely.
 
 The main template (the one which partial path you pass as argument to
-[Gledki.Execute]) can be compiled from several files – as many as you need –
+[Gledki.Exec]) can be compiled from several files – as many as you need –
 with the simple approach of wrapping and including partial files recursively.
 [TagFunc] allows us to keep logic into our Go code and prepare pieces of the
 output as needed. Leveraging cleverly TagFunc gives us complete separation of
@@ -30,8 +32,10 @@ The documentation uses these words for the different forms of a template:
     walking the Roots.
   - template text: the content of a template file, as it is read from disk.
   - compiled text: the text, produced from a template text by the directives
-    `wrapper` and `include`. The directives are already replaced in it; only
-    the placeholders for the values in the [Stash] are left. [Gledki.Compile]
+    `wrapper` and `include`, with the comments `${# …}` removed and the
+    spaces around the content of every tag trimmed. The directives are
+    already replaced in it; only the placeholders for the values in the
+    [Stash] are left. [Gledki.Compile]
     returns it.
   - compiled file: the file `fullPath` + [CompiledSuffix] (for example
     `view.htmc`) next to the template file. It contains the compiled text.
@@ -50,8 +54,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -125,13 +127,13 @@ type Gledki struct {
 	Roots []string
 	// Pair of Tags, for example:  "${", "}".
 	Tags [2]string
-	// How deeply files can be included into each other.
-	// Default: 3; starting from 0 in the main template.
+	// How deeply files can be wrapped and included into each other. The main
+	// template file is at depth 0; every `include` and every `wrapper` puts
+	// the file it names one level deeper. Default: 4 (one wrapper and three
+	// levels of inclusions in it).
 	IncludeLimit int
 	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
 	Logger Logger
-	// regex objects instantiated in New() and ready for use.
-	res map[string]*regexp.Regexp
 	// fullPaths remembers, for each template path passed to toFullPath, the
 	// full path of the file which toFullPath found on disk. The next time the
 	// same template is needed, its full path is taken from here, without
@@ -151,10 +153,10 @@ var spf = fmt.Sprintf
 
 // CacheTemplates can be set to false to disable caching during development, so
 // that every change in a template file is seen without restarting the
-// application. Then [Gledki.Compile] compiles the template every time: it does
-// not take the compiled template from memory or from a compiled file on disk
-// (see [CompiledSuffix]) and does not store it there; [Gledki.LoadFile] reads
-// the file every time; and the full paths of the template files are not
+// application. Then [Gledki.Compile] compiles the template file every time: it
+// does not take the compiled template from memory or the compiled text from
+// the compiled file (see [CompiledSuffix]) and does not store them there;
+// [Gledki.LoadFile] reads the template file every time; and the full paths of the template files are not
 // remembered. Set it once, before the first template is compiled, and do not
 // change it while templates are compiled in other goroutines.
 var CacheTemplates = true
@@ -170,7 +172,7 @@ func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, e
 		Stash:        make(Stash, 15),
 		Ext:          ext,
 		Tags:         tags,
-		IncludeLimit: 3,
+		IncludeLimit: 4,
 		Logger:       log.New("gledki"),
 	}
 	if err := t.findRoots(roots); err != nil {
@@ -184,7 +186,6 @@ func New(roots []string, ext string, tags [2]string, loadFiles bool) (*Gledki, e
 			return nil, err
 		}
 	}
-	t.makeRegexes()
 	return t, nil
 }
 
@@ -204,14 +205,23 @@ or an error (see Terms in the package documentation). The compiled text can
 be used by any of the methods [Gledki.FtExec], [Gledki.FtExecStd],
 [Gledki.FtExecString] or [Gledki.FtExecStringStd]. This means:
   - The template text is read from the template file using [Gledki.LoadFile].
-  - If the template text contains `${wrapper some/file}`, the template text
-    of the wrapper file is wrapped around it. Only one `wrapper` directive is
-    allowed per template file.
+  - If the template text contains `${wrapper some/file}`, the template text of
+    the wrapper file is wrapped around it: the template text is put in place of
+    `${content}` in the wrapper file. A `${content}` in a file included into
+    the wrapper file stays a placeholder for a value in the [Stash]. Only the
+    first `wrapper` directive in a template file is used; every other `wrapper`
+    directive in the same file is removed like a comment, its file is not read,
+    and a warning with the template file and the line is logged. A wrapper file
+    can have its own wrapper.
   - If the template text contains any `${include some/file}`, the template
     texts of these files are read, wrapped (if there is a wrapper directive
     in them) and included at these places without replacing any
     placeholders. The inclusion is done recursively. See
     [Gledki.IncludeLimit]. The result is the compiled text.
+  - A wrapper or included file, which cannot be read (for example
+    `${include no/such/file}`), is an error, which names the template file
+    and the line of the directive. A template text with a NUL byte is an
+    error too.
   - The compiled text is parsed into a parsed template (a
     [fasttemplate.Template] object): every placeholder is found once, so that
     executing it later only writes the output.
@@ -241,8 +251,9 @@ be used by any of the methods [Gledki.FtExec], [Gledki.FtExecStd],
     taken: every call makes the compiled text again from the template files
     and parses it, so every change in them is seen at once.
 
-Panics in case the *Gledki.IncludeLimit is reached. If you have deeply nested
-included files you may need to set a bigger integer. This method is suitable
+Panics in case the *Gledki.IncludeLimit is reached, also by a cycle of
+wrappers or inclusions. If you have deeply nested wrapped or included files
+you may need to set a bigger integer. This method is suitable
 for use in a ft.TagFunc to prepare parts of the output to be replaced in the
 main template.
 */
@@ -291,21 +302,9 @@ func (t *Gledki) compile(path string) (compiledT *compiledTemplate, err error) {
 		return nil, err
 	}
 	tCheck := &tagCheck{}
-	tCheck.check(t, path, text)
-	// TODO: Remove the spaces between the tags and their content before
-	// all other directives, so `${ include some/file }` works too. The
-	// wrapper and included files need the same, so maybe in LoadFile.
-	if text, err = t.wrap(text, tCheck); err != nil {
+	if text, err = t.preprocess(path, text, 0, tCheck); err != nil {
 		return nil, err
 	}
-
-	if text, err = t.include(text, tCheck); err != nil {
-		return nil, err
-	}
-	// TODO: Remove comments like `${# ...}` and prepare dot notations like
-	// `${keyFromStash.Property}` and `${execute path/to/file}`. Decide how
-	// dot notations and execute are resolved – at compile time (a private
-	// stash of the file) or at execution time.
 	compiledT = t.parse(text)
 	compiledT.tagErr = tCheck.err
 	if compiledT.tpl == nil && compiledT.tagErr == nil {
@@ -601,111 +600,6 @@ func isReadable(path string) bool {
 	fh, err := os.Open(path)
 	_ = fh.Close()
 	return err == nil
-}
-
-// include replaces all occurrences of `include path/to/template` in `text` with
-// the contents of the partial templates. Panics in case the
-// [Gledki.IncludeLimit] is reached. If you have deeply nested included files
-// you may need to set a bigger integer.
-func (t *Gledki) include(text string, tCheck *tagCheck) (string, error) {
-	re := t.res["include"]
-	matches := re.FindAllStringSubmatch(text, -1)
-	howMany := len(matches)
-	if howMany > 0 {
-		// t.Logger.Debugf("include: %#v", matches)
-		stash := make(Stash, howMany)
-		for _, m := range matches {
-			if t.detectInludeRecursionLimit() {
-				t.Logger.Panicf("Limit of %d nested inclusions reached"+
-					" while trying to include %s", t.IncludeLimit, m[2])
-				//return text, nil
-			}
-			includedFileContent, err := t.LoadFile(m[2])
-			if err != nil {
-				t.Logger.Warnf("err:%s", err.Error())
-				return "", err
-			}
-			tCheck.check(t, t.toFullPath(m[2]), includedFileContent)
-			includedFileContent, err = t.wrap(strings.TrimSuffix(includedFileContent, "\n"), tCheck)
-			if err != nil {
-				return "", err
-			}
-			stash[m[1]], err = t.include(includedFileContent, tCheck)
-			if err != nil {
-				return "", err
-			}
-		}
-		// Replace ${include file/name.ext} with file content, but keep
-		// placeholders for the main Execute!
-		return t.FtExecStringStd(text, stash), nil
-	}
-	return text, nil
-}
-
-// If a template file contains `${wrap some/file}`, then `some/file` is loaded
-// and the content is put in it in place of `${content}`. This means that
-// `content` placeholder is special in wrapper templates and cannot be used as
-// a regular placeholder. Only one `wrapper` directive is allowed per file.
-// Returns the wrapped template text or the passed text with error.
-func (t *Gledki) wrap(text string, tCheck *tagCheck) (string, error) {
-	text = strings.TrimSuffix(text, "\n")
-	re := t.res["wrap"]
-	// allow only one wrapper
-	match := re.FindStringSubmatch(text)
-	if len(match) > 2 {
-		// t.Logger.Debugf("wrapper: %#v", match)
-		wrapperFile, err := t.LoadFile(string(match[2]))
-		if err != nil {
-			return "", err
-		}
-		tCheck.check(t, t.toFullPath(string(match[2])), wrapperFile)
-		wrapperFile = strings.TrimSuffix(wrapperFile, "\n")
-		// remove the matched m[1] from text
-		text = strings.Replace(text, match[1], "", 1)
-		// replace content with text
-		text = t.FtExecStringStd(wrapperFile, map[string]any{"content": text})
-	}
-	return text, nil
-}
-
-// frames = 1 : direct recursion - calls it self - fine.
-// frames < t.IncludeLimit : direct recursion - calls it self - still fine.
-// frames == t.IncludeLimit : indirect - some caller on t.IncludeLimit call
-// frame still calls the same function - too many recursion levels - stop.
-func (t *Gledki) detectInludeRecursionLimit() bool {
-	pcme, _, _, _ := runtime.Caller(1)
-	detailsme := runtime.FuncForPC(pcme)
-	pc, _, _, _ := runtime.Caller(1 + t.IncludeLimit)
-	details := runtime.FuncForPC(pc)
-	return (details != nil) && detailsme.Name() == details.Name()
-}
-
-// Make a map[names]*regexp.Regexp for internal use by directives'
-// implementations.
-func (t *Gledki) makeRegexes() {
-	t.res = make(map[string]*regexp.Regexp, 2)
-	t.res = map[string]*regexp.Regexp{
-		"wrap": regexp.MustCompile(spf(
-			`(?m:(\Q%s\Ewrapper\s+([/\.\-\w]+)\Q%s\E[\r]?[\n]?))`, t.Tags[0], t.Tags[1])),
-		"include": regexp.MustCompile(
-			spf(`\Q%s\E(include\s+([/\.\-\w]+))\Q%s\E`, t.Tags[0], t.Tags[1])),
-		// TODO: A regexp which removes the spaces between the tags and their
-		// content, for example `${ include some/file }` => `${include
-		// some/file}`. It is applied before all the others.
-		// "spaces": regexp.MustCompile(spf(``, t.Tags[0], t.Tags[1])),
-		// TODO: A regexp which totally removes comments like `${# ...}` from
-		// the template so fasttemplate does not process them.
-		// "comment": regexp.MustCompile(spf(``, t.Tags[0], t.Tags[1])),
-		// TODO: A regexp which finds dot notations like
-		// `${keyFromStash.Property}`, resolved to the property of an object
-		// added to the stash. Only one level deep for now.
-		// "dot": regexp.MustCompile(spf(``, t.Tags[0], t.Tags[1])),
-		// TODO: A regexp which finds `${execute path/to/file}` directives. The
-		// file is compiled and executed with the stash, with which the
-		// current template is executed and rendered.
-		// "exec": regexp.MustCompile(spf(``, t.Tags[0], t.Tags[1])),
-
-	}
 }
 
 // Logger is implemented by gommon/log on which we depend.
