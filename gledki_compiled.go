@@ -20,8 +20,9 @@ import (
 type compiledTemplate struct {
 	text string
 	tpl  *fasttemplate.Template
-	// tagErr is the first start tag without an end tag, found in the
-	// template texts while compiling, with the template file and the line.
+	// tagErr is the first problem, found in the template texts while
+	// compiling – a start tag without an end tag or a call of an unknown
+	// function – with the template file and the line.
 	// It is nil, when the compiled template is taken from a compiled file,
 	// which can be parsed.
 	tagErr error
@@ -67,11 +68,21 @@ func (t *Gledki) parse(text string) *compiledTemplate {
 	return compiledT
 }
 
-// tagCheck keeps the first start tag without an end tag, found in the
-// template texts of one compilation (the main template file, its wrapper and
-// the included files). One tagCheck is used by one compilation only.
+// tagCheck keeps the first problem, found in the template texts of one
+// compilation (the main template file, its wrapper and the included files): a
+// start tag without an end tag or a call of an unknown function. It is not an
+// error: [Gledki.Compile] logs it as a warning and [Gledki.MustCompile] panics
+// with it. One tagCheck is used by one compilation only.
 type tagCheck struct {
 	err error
+}
+
+// note keeps `err` as the problem of the compilation, if no problem is kept
+// yet.
+func (tCheck *tagCheck) note(err error) {
+	if tCheck.err == nil {
+		tCheck.err = err
+	}
 }
 
 // check looks in the template text `text` of the template file `fullPath`

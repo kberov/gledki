@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/labstack/gommon/log"
 )
 
 // describe prints the call `c` for the tests: If(key:a, lit:x), nested calls
@@ -75,5 +77,53 @@ func TestParseCall(t *testing.T) {
 				t.Fatalf("got %q, want %q", describe(got), c.want)
 			}
 		})
+	}
+}
+
+// compileCallErrorCases are the cases of [TestCompileCallErrors]: the main
+// template text and what the error of compiling it must contain.
+var compileCallErrorCases = []struct{ name, page, want string }{
+	{"wrong arity", "a\n${If(a)}", "page.htm, line 2: If takes 2 arguments, got 1"},
+	{"operator", "${If(!a, b)}", "page.htm, line 1: !a is not allowed in a call"},
+	{"end tag in literal", "${IfElse(a, `}`, `x`)}", "page.htm, line 1: cannot parse"},
+}
+
+// TestCompileCallErrors checks that a wrong call of a builtin is a compile
+// error with the template file and the line.
+func TestCompileCallErrors(t *testing.T) {
+	for _, c := range compileCallErrorCases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFiles(t, root, map[string]string{"page.htm": c.page})
+			_, err := newIn(t, root, tagsPair).Compile("page")
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("the error must contain %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+// TestUnknownFunctionWarning checks that a call of an unknown function stays
+// a placeholder and is logged as a warning, and that MustCompile panics with
+// it.
+func TestUnknownFunctionWarning(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{"page.htm": "a\n${Iff(a, b)}"})
+	tpls := newIn(t, root, tagsPair)
+	var logged strings.Builder
+	tpls.Logger = log.New("test")
+	tpls.Logger.SetOutput(&logged)
+	tpls.Logger.SetLevel(log.WARN)
+
+	text, err := tpls.Compile("page")
+	if err != nil || text != "a\n${Iff(a, b)}" {
+		t.Fatalf("Compile: got %q, %v", text, err)
+	}
+	const want = "page.htm, line 2: unknown function Iff in ${Iff(a, b)}, written as a placeholder"
+	if !strings.Contains(logged.String(), want) {
+		t.Errorf("the warning must contain %q, got %q", want, logged.String())
+	}
+	if msg := panicMessage(func() { tpls.MustCompile("page") }); !strings.Contains(msg, want) {
+		t.Errorf("MustCompile must panic with %q, got %q", want, msg)
 	}
 }
