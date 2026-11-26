@@ -69,7 +69,7 @@ func (c *call) run(e *execution, w io.Writer) (int, error) {
 	for i, a := range c.args {
 		switch a.kind {
 		case argKey:
-			args[i] = e.stash[a.text]
+			args[i] = keyValue(e.stash, a.text)
 		case argLiteral:
 			args[i] = a.text
 		case argCall:
@@ -77,6 +77,17 @@ func (c *call) run(e *execution, w io.Writer) (int, error) {
 		}
 	}
 	return c.fn.run(e, w, c, args)
+}
+
+// keyValue returns the value of `key` in `stash`. A [TagFunc] is wrapped, so
+// that it is called with its own key as the tag, as when it is the value of a
+// placeholder, and not with the text of the call it is passed to.
+func keyValue(stash Stash, key string) any {
+	v := stash[key]
+	if tf, ok := v.(TagFunc); ok {
+		return TagFunc(func(w io.Writer, _ string) (int, error) { return tf(w, key) })
+	}
+	return v
 }
 
 // tagFunc returns a [TagFunc], which runs the call `c` in the execution `e`.
@@ -133,7 +144,8 @@ var errUnknownFunc = errors.New("unknown function")
 //   - nil, nil, when `content` is not a call (for example `title` or `a b`);
 //   - nil and an error wrapping [errUnknownFunc] for a call of a function,
 //     which is not a builtin;
-//   - nil and an error for a wrong call of a builtin;
+//   - nil and an error for a wrong call of a builtin, also for an
+//     expression, which is not a call, but contains one (see [builtinInside]);
 //   - the ready call otherwise.
 func parseCall(content string) (*call, error) {
 	expr, err := parser.ParseExpr(content)
@@ -145,9 +157,29 @@ func parseCall(content string) (*call, error) {
 	}
 	ce, ok := expr.(*ast.CallExpr)
 	if !ok {
-		return nil, nil
+		return nil, builtinInside(content, expr)
 	}
 	return parseCallExpr(content, ce)
+}
+
+// builtinInside returns an error, when the expression `expr`, which is not a
+// call, contains a call of a builtin, for example (If(a, `x`)) or
+// If(a, `x`).Y: it would stay a placeholder, which writes nothing. Other
+// expressions (also with calls of other functions, as in JavaScript) are not
+// for gledki, so they are no error.
+func builtinInside(content string, expr ast.Expr) error {
+	var err error
+	ast.Inspect(expr, func(n ast.Node) bool {
+		ce, ok := n.(*ast.CallExpr)
+		if !ok || err != nil {
+			return err == nil
+		}
+		if ident, ok := ce.Fun.(*ast.Ident); ok && builtins[ident.Name] != nil {
+			err = fmt.Errorf("%s: a call of a builtin must be the whole tag content", source(content, expr))
+		}
+		return err == nil
+	})
+	return err
 }
 
 // startsWithBuiltin tells whether `content` starts with the name of a builtin

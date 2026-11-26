@@ -70,13 +70,14 @@ func (c *compiledMap) delete(path string) {
 // parse parses the compiled text `text` into a parsed template with the
 // [Gledki.Tags] of this instance and returns both as a compiled template,
 // together with the ready calls in it (see [Gledki.parseCalls]). If a start
-// tag has no end tag, the parsed template is nil and no calls are made.
+// tag has no end tag, the parsed template is nil, but the calls before that
+// tag are still made: they run, while the start tag is written as it is.
 func (t *Gledki) parse(text string) *compiledTemplate {
 	compiledT := &compiledTemplate{text: text}
 	if tpl, err := fasttemplate.NewTemplate(text, t.Tags[0], t.Tags[1]); err == nil {
 		compiledT.tpl = tpl
-		t.parseCalls(compiledT)
 	}
+	t.parseCalls(compiledT)
 	return compiledT
 }
 

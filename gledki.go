@@ -53,6 +53,12 @@ A template can call a few Go functions (builtins) with values from the
 	<img src="${IfElse(weHaveAUser, `/img/user.svg`, `/img/users-plus.svg`)}">
 	${If(showForm, Exec(`partials/form`))}
 
+A template sees only the stash: a name in it is a stash key, never a
+variable, function or package of the Go program. It can call only the
+builtins below; a call of any other function stays a placeholder. So a
+template can use the values, which the program puts in the stash, but it
+cannot reach anything else in the program.
+
 The builtins are [If], [IfElse] and Exec (it executes another template file
 with the same stash, like [Gledki.Exec]). The condition of If and IfElse must
 be a bool in the stash; anything else (also a missing key) panics, and the

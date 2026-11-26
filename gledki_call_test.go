@@ -2,6 +2,7 @@ package gledki
 
 import (
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -55,6 +56,9 @@ var parseCallCases = []parseCallCase{
 	{"If(a, 1)", "", "only string literals are allowed, got 1"},
 	{"If(a, inv.Total)", "", "dot notation is not supported yet: inv.Total"},
 	{"IfElse(a, `", "", "cannot parse"},
+	{"(If(a, `x`))", "", "(If(a, `x`)): a call of a builtin must be the whole tag content"},
+	{"If(a, `x`).Y", "", "a call of a builtin must be the whole tag content"},
+	{"Math.max(a, b) + 1", "", ""},
 }
 
 // TestParseCall checks which tag contents are calls of builtins and how they
@@ -88,6 +92,7 @@ var compileCallErrorCases = []struct{ name, page, want string }{
 	{"wrong arity", "a\n${If(a)}", "page.htm, line 2: If takes 2 arguments, got 1"},
 	{"operator", "${If(!a, b)}", "page.htm, line 1: !a is not allowed in a call"},
 	{"end tag in literal", "${IfElse(a, `}`, `x`)}", "page.htm, line 1: cannot parse"},
+	{"builtin inside", "\n${If(a, `x`).Y}", "page.htm, line 2: If(a, `x`).Y: a call of a builtin must be the whole tag content"},
 }
 
 // TestCompileCallErrors checks that a wrong call of a builtin is a compile
@@ -178,7 +183,15 @@ var callCases = []callCase{
 		stash: Stash{"form": 5}, panics: "Exec(form): argument 1 (form) is int, not string"},
 	{name: "exec cycle", files: page("${Exec(`page`)}"),
 		stash: Stash{}, panics: "nested Exec calls reached while trying to execute page"},
+	{name: "call before unclosed tag", files: page("[${If(u, `x`)}] ${"),
+		stash: Stash{"u": true}, want: "[x] ${",
+	},
+	{name: "tagfunc gets its key", files: page("[${If(u, f)}|${IfElse(u, g, `b`)}]"),
+		stash: Stash{"u": true, "f": writeTag, "g": writeTag}, want: "[f|g]"},
 }
+
+// writeTag is a [TagFunc], which writes the tag it is called with.
+var writeTag TagFunc = func(w io.Writer, tag string) (int, error) { return io.WriteString(w, tag) }
 
 // TestCalls checks the calls of builtins, executed by [Gledki.Exec].
 func TestCalls(t *testing.T) {
