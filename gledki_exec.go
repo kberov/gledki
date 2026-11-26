@@ -13,6 +13,9 @@ import (
 // executing it only writes the output to `w`. String values are not copied,
 // when `w` has a WriteString method: they are written with [io.WriteString].
 //
+// For a tag, whose key is not in `stash`, Exec runs the ready call of a
+// builtin, if the tag is one (see Calls in the package documentation).
+//
 // Unlike [Gledki.Execute], Exec does not use, change or clear [Gledki.Stash].
 // So one Gledki can be used by many goroutines at the same time (for example
 // one per HTTP request), when each of them passes its own `stash`. A [TagFunc]
@@ -21,18 +24,36 @@ import (
 //
 // A start tag without an end tag is written as it is (see [Gledki.Compile]).
 // Exec panics, when a value in `stash` is not a []byte, a string or a
-// [TagFunc], and when [Gledki.IncludeLimit] is reached while compiling.
+// [TagFunc], when [Gledki.IncludeLimit] is reached while compiling or by
+// nested calls of the builtin Exec, when a condition of If or IfElse is not a
+// bool, and when the path of the builtin Exec is not a string.
 //
 // The path is resolved like in [Gledki.Execute]. In v0.8.0 Exec becomes
 // Execute: Execute will take the stash as an argument and Exec will be
 // removed.
 func (t *Gledki) Exec(w io.Writer, path string, stash Stash) (int64, error) {
+	return t.exec(w, path, stash, 0)
+}
+
+// exec does the work of [Gledki.Exec]. `depth` is how many calls of the
+// builtin Exec deep the template file `path` is executed (0 for Gledki.Exec).
+// For every tag it writes the value from `stash`, when `stash` has the key
+// (even with a nil value); otherwise it runs the ready call of a builtin, if
+// the tag is one (see [call.run]); otherwise it writes nothing.
+func (t *Gledki) exec(w io.Writer, path string, stash Stash, depth int) (int64, error) {
 	compiledT, err := t.compile(path)
 	if err != nil {
 		return 0, err
 	}
+	e := &execution{t: t, stash: stash, depth: depth}
 	f := func(w io.Writer, tag string) (int, error) {
-		return stashTagFunc(w, tag, stash)
+		if v, ok := stash[tag]; ok {
+			return writeValue(w, tag, v)
+		}
+		if c := compiledT.calls[tag]; c != nil {
+			return c.run(e, w)
+		}
+		return 0, nil
 	}
 	if compiledT.tpl == nil {
 		// A start tag without an end tag: it is written as it is, as in v0.7.8.

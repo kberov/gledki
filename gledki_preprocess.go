@@ -1,6 +1,7 @@
 package gledki
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -174,9 +175,31 @@ func (p *preprocessor) checkLimit(action, path string) {
 }
 
 // placeholder writes the tag back with its trimmed content, so it is
-// replaced by a value from the [Stash] at execution time.
+// replaced by a value from the [Stash] or by a call at execution time. A call
+// is checked first (see [preprocessor.checkCall]).
 func (p *preprocessor) placeholder(w io.Writer, content string) (int, error) {
+	if err := p.checkCall(content); err != nil {
+		return 0, err
+	}
 	return io.WriteString(w, p.t.Tags[0]+content+p.t.Tags[1])
+}
+
+// checkCall checks the tag content `content` with [parseCall]. A wrong call
+// of a builtin is an error with the template file and the line. A call of an
+// unknown function is not an error: it is kept as the problem of the
+// compilation (see [tagCheck]) and the tag stays a placeholder.
+func (p *preprocessor) checkCall(content string) error {
+	_, err := parseCall(content)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errUnknownFunc):
+		p.tCheck.note(p.errorf(p.tagAt, "%v in %s, written as a placeholder",
+			err, p.t.Tags[0]+content+p.t.Tags[1]))
+		return nil
+	default:
+		return p.errorf(p.tagAt, "%w", err)
+	}
 }
 
 // wrap returns `text` as it is, when no wrapper was found. Otherwise it

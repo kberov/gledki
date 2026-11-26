@@ -42,8 +42,47 @@ The documentation uses these words for the different forms of a template:
   - parsed template: a [fasttemplate.Template] object, made from a compiled
     text. In it every placeholder is already found, so executing it only
     writes the output.
-  - compiled template: the compiled text together with its parsed template,
-    kept in memory.
+  - compiled template: the compiled text together with its parsed template
+    and the ready calls in it (see Calls), kept in memory.
+
+# Calls
+
+A template can call a few Go functions (builtins) with values from the
+[Stash], so that fewer values have to be prepared in Go:
+
+	<img src="${IfElse(weHaveAUser, `/img/user.svg`, `/img/users-plus.svg`)}">
+	${If(showForm, Exec(`partials/form`))}
+
+A template sees only the stash: a name in it is a stash key, never a
+variable, function or package of the Go program. It can call only the
+builtins below; a call of any other function stays a placeholder. So a
+template can use the values, which the program puts in the stash, but it
+cannot reach anything else in the program.
+
+The builtins are [If], [IfElse] and Exec (it executes another template file
+with the same stash, like [Gledki.Exec]). The condition of If and IfElse must
+be a bool in the stash; anything else (also a missing key) panics, and the
+panic names the call and the argument. An argument is one of:
+
+  - a stash key (`weHaveAUser`): its value from the stash;
+  - a string literal in backticks or double quotes (`partials/form`);
+  - a nested call (`Exec(`partials/form`)`): it runs only when its result is
+    written, so above the form is executed only when showForm is true.
+
+Nothing else is allowed: no operators, no numbers, no dot notation yet. The
+logic stays in Go; the template only calls. The tag content is parsed with
+[go/parser.ParseExpr] once, when the template is compiled; a wrong call of a
+builtin is a compile error with the template file and the line, and a call of
+an unknown function stays a placeholder and is logged as a warning. When the
+template is executed, the stash wins: if it has a key equal to the tag
+content, its value is written, and the call does not run.
+
+Only [Gledki.Exec] (and [Gledki.Execute]) run calls; [Gledki.FtExec] and its
+siblings execute the compiled text with fasttemplate and know nothing about
+them. An end tag inside a literal (`${IfElse(a, `}`, `x`)}`) ends the tag, so
+such a call is a compile error. Nested Exec calls are limited by
+[Gledki.IncludeLimit]; a [TagFunc] in the stash, which calls [Gledki.Exec]
+itself, starts the count again.
 */
 package gledki
 
@@ -130,7 +169,9 @@ type Gledki struct {
 	// How deeply files can be wrapped and included into each other. The main
 	// template file is at depth 0; every `include` and every `wrapper` puts
 	// the file it names one level deeper. Default: 4 (one wrapper and three
-	// levels of inclusions in it).
+	// levels of inclusions in it). It also limits how deeply the builtin Exec
+	// can be called from templates, executed by other Exec calls (see Calls in
+	// the package documentation).
 	IncludeLimit int
 	// Any logger defining Debug, Error, Info, Warn... See tmpls.Logger.
 	Logger Logger
@@ -222,6 +263,10 @@ be used by any of the methods [Gledki.FtExec], [Gledki.FtExecStd],
     `${include no/such/file}`), is an error, which names the template file
     and the line of the directive. A template text with a NUL byte is an
     error too.
+  - Every call of a builtin (see Calls in the package documentation) is
+    checked: a wrong call is an error with the template file and the line; a
+    call of an unknown function stays a placeholder and is logged as a
+    warning, like a start tag without an end tag.
   - The compiled text is parsed into a parsed template (a
     [fasttemplate.Template] object): every placeholder is found once, so that
     executing it later only writes the output.
@@ -346,6 +391,11 @@ func (t *Gledki) loadCompiled(fullPath string) (*compiledTemplate, error) {
 		// file with the start tag without an end tag is reported.
 		return nil, fmt.Errorf("compiled file %s: start tag %q without end tag",
 			fullPath+CompiledSuffix, t.Tags[0])
+	}
+	if compiledT.callErr != nil {
+		// Compile it again from the template files, so that the wrong call
+		// is reported with the template file and the line.
+		return nil, fmt.Errorf("compiled file %s: %w", fullPath+CompiledSuffix, compiledT.callErr)
 	}
 	t.compiled.store(fullPath, compiledT)
 	return compiledT, nil

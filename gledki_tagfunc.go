@@ -18,7 +18,14 @@ import (
 // A missing or nil value writes nothing. A value of a type other than
 // []byte, string or [TagFunc] panics, as in fasttemplate.
 func stashTagFunc(w io.Writer, tag string, stash Stash) (int, error) {
-	switch value := stash[tag].(type) {
+	return writeValue(w, tag, stash[tag])
+}
+
+// writeValue writes the value `v` of the placeholder `tag` to `w`, as
+// [stashTagFunc] describes: nil writes nothing; a string, a []byte or a
+// [TagFunc] is written; any other type panics.
+func writeValue(w io.Writer, tag string, v any) (int, error) {
+	switch value := v.(type) {
 	case nil:
 		return 0, nil
 	case string:
