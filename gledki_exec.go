@@ -13,6 +13,9 @@ import (
 // executing it only writes the output to `w`. String values are not copied,
 // when `w` has a WriteString method: they are written with [io.WriteString].
 //
+// For a tag, whose key is not in `stash`, Exec runs the ready call of a
+// builtin, if the tag is one (see Calls in the package documentation).
+//
 // Unlike [Gledki.Execute], Exec does not use, change or clear [Gledki.Stash].
 // So one Gledki can be used by many goroutines at the same time (for example
 // one per HTTP request), when each of them passes its own `stash`. A [TagFunc]
@@ -21,7 +24,9 @@ import (
 //
 // A start tag without an end tag is written as it is (see [Gledki.Compile]).
 // Exec panics, when a value in `stash` is not a []byte, a string or a
-// [TagFunc], and when [Gledki.IncludeLimit] is reached while compiling.
+// [TagFunc], when [Gledki.IncludeLimit] is reached while compiling or by
+// nested calls of the builtin Exec, when a condition of If or IfElse is not a
+// bool, and when the path of the builtin Exec is not a string.
 //
 // The path is resolved like in [Gledki.Execute]. In v0.8.0 Exec becomes
 // Execute: Execute will take the stash as an argument and Exec will be

@@ -166,6 +166,18 @@ var callCases = []callCase{
 		stash: Stash{}, panics: "If(u, `x`): condition u is <nil>, not bool"},
 	{name: "string condition", files: page("${If(u, `x`)}"),
 		stash: Stash{"u": "yes"}, panics: "condition u is string, not bool"},
+	{name: "exec literal", files: map[string]string{"page.htm": "[${Exec(`p`)}]", "p.htm": "${title}"},
+		stash: Stash{"title": "T"}, want: "[T]"},
+	{name: "exec key", files: map[string]string{"page.htm": "[${Exec(form)}]", "p.htm": "P"},
+		stash: Stash{"form": "p"}, want: "[P]"},
+	{name: "exec skipped", files: page("[${If(u, Exec(`missing`))}]"),
+		stash: Stash{"u": false}, want: "[]"},
+	{name: "exec in if", files: map[string]string{"page.htm": "[${If(u, Exec(`p`))}]", "p.htm": "P"},
+		stash: Stash{"u": true}, want: "[P]"},
+	{name: "path not string", files: page("${Exec(form)}"),
+		stash: Stash{"form": 5}, panics: "Exec(form): path form is int, not string"},
+	{name: "exec cycle", files: page("${Exec(`page`)}"),
+		stash: Stash{}, panics: "nested Exec calls reached while trying to execute page"},
 }
 
 // TestCalls checks the calls of builtins, executed by [Gledki.Exec].
@@ -245,4 +257,16 @@ func TestCallsConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// TestExecMissingFile checks that Exec called from a template returns the
+// error of a template file, which cannot be read.
+func TestExecMissingFile(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, page("${Exec(`missing`)}"))
+	var out strings.Builder
+	_, err := newIn(t, root, tagsPair).Exec(&out, "page", Stash{})
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("the error must contain %q, got %v", "missing", err)
+	}
 }

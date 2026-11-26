@@ -53,13 +53,10 @@ type execution struct {
 var builtins map[string]*builtin
 
 func init() {
-	notImplemented := func(*execution, io.Writer, *call, []any) (int, error) {
-		panic("not implemented")
-	}
 	builtins = map[string]*builtin{
 		"If":     {arity: 2, run: runIf},
 		"IfElse": {arity: 3, run: runIfElse},
-		"Exec":   {arity: 1, run: notImplemented},
+		"Exec":   {arity: 1, run: runExec},
 	}
 }
 
@@ -216,4 +213,21 @@ func notAllowed(content string, n ast.Node) error {
 // source returns the text of the node `n` in `content`, as it is written.
 func source(content string, n ast.Node) string {
 	return content[n.Pos()-1 : n.End()-1]
+}
+
+// runExec runs [Gledki.Exec] called from a template: ${Exec(`path`)} or
+// ${Exec(key)}. The template file is executed with the same stash, one Exec
+// call deeper. The path must be a string; nested Exec calls are limited by
+// [Gledki.IncludeLimit], so a cycle panics instead of never ending.
+func runExec(e *execution, w io.Writer, c *call, args []any) (int, error) {
+	path, ok := args[0].(string)
+	if !ok {
+		panic(fmt.Sprintf("%s: path %s is %T, not string", c.text, c.args[0].text, args[0]))
+	}
+	if e.depth+1 > e.t.IncludeLimit {
+		e.t.Logger.Panicf("Limit of %d nested Exec calls reached while trying to execute %s",
+			e.t.IncludeLimit, path)
+	}
+	n, err := e.t.exec(w, path, e.stash, e.depth+1)
+	return int(n), err
 }
