@@ -55,8 +55,8 @@ A template can call a few Go functions (builtins) with values from the
 
 The builtins are [If], [IfElse] and Exec (it executes another template file
 with the same stash, like [Gledki.Exec]). The condition of If and IfElse must
-be a bool in the stash; anything else (also a missing key) panics. An
-argument is one of:
+be a bool in the stash; anything else (also a missing key) panics, and the
+panic names the call and the argument. An argument is one of:
 
   - a stash key (`weHaveAUser`): its value from the stash;
   - a string literal in backticks or double quotes (`partials/form`);

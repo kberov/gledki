@@ -54,8 +54,8 @@ var builtins map[string]*builtin
 
 func init() {
 	builtins = map[string]*builtin{
-		"If":     {arity: 2, run: runIf},
-		"IfElse": {arity: 3, run: runIfElse},
+		"If":     fn2(If),
+		"IfElse": fn3(IfElse),
 		"Exec":   {arity: 1, run: runExec},
 	}
 }
@@ -86,25 +86,42 @@ func (c *call) tagFunc(e *execution) TagFunc {
 	}
 }
 
-// condition returns the first argument of the call `c` as a bool. It panics,
-// when the value is not a bool (also when the stash has no such key): a
-// missing value silently taken as false would hide a typo in the template.
-func (c *call) condition(args []any) bool {
-	cond, ok := args[0].(bool)
-	if !ok {
-		panic(fmt.Sprintf("%s: condition %s is %T, not bool", c.text, c.args[0].text, args[0]))
+// arg returns the argument `i` of the call `c` from its values `args` as a
+// `T`. A nil value is returned as the zero `T`, when `T` is an interface type
+// (`any`), so a missing stash key reaches such a parameter as nil. Any other
+// value, which is not a `T`, panics with the call and the argument: a missing
+// bool silently taken as false would hide a typo in the template.
+func arg[T any](c *call, args []any, i int) T {
+	v, ok := args[i].(T)
+	if !ok && (args[i] != nil || any(v) != nil) {
+		panic(fmt.Sprintf("%s: argument %d (%s) is %T, not %T", c.text, i+1, c.args[i].text, args[i], v))
 	}
-	return cond
+	return v
 }
 
-// runIf runs [If] called from a template: ${If(cond, stmt)}.
-func runIf(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-	return If(c.condition(args), args[1])(w, c.text)
+// fn1 makes a builtin from the Go function `f` with one parameter. The
+// result of `f` is written like a stash value (nil, string, []byte or
+// [TagFunc]).
+func fn1[A, R any](f func(A) R) *builtin {
+	return &builtin{arity: 1, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+		return value(f(arg[A](c, args, 0)))(w, c.text)
+	}}
 }
 
-// runIfElse runs [IfElse] called from a template: ${IfElse(cond, then, els)}.
-func runIfElse(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-	return IfElse(c.condition(args), args[1], args[2])(w, c.text)
+// fn2 makes a builtin from the Go function `f` with two parameters, like
+// [fn1].
+func fn2[A, B, R any](f func(A, B) R) *builtin {
+	return &builtin{arity: 2, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+		return value(f(arg[A](c, args, 0), arg[B](c, args, 1)))(w, c.text)
+	}}
+}
+
+// fn3 makes a builtin from the Go function `f` with three parameters, like
+// [fn1].
+func fn3[A, B, C, R any](f func(A, B, C) R) *builtin {
+	return &builtin{arity: 3, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+		return value(f(arg[A](c, args, 0), arg[B](c, args, 1), arg[C](c, args, 2)))(w, c.text)
+	}}
 }
 
 // errUnknownFunc is wrapped by the error of [parseCall] for a call of a
@@ -220,10 +237,7 @@ func source(content string, n ast.Node) string {
 // call deeper. The path must be a string; nested Exec calls are limited by
 // [Gledki.IncludeLimit], so a cycle panics instead of never ending.
 func runExec(e *execution, w io.Writer, c *call, args []any) (int, error) {
-	path, ok := args[0].(string)
-	if !ok {
-		panic(fmt.Sprintf("%s: path %s is %T, not string", c.text, c.args[0].text, args[0]))
-	}
+	path := arg[string](c, args, 0)
 	if e.depth+1 > e.t.IncludeLimit {
 		e.t.Logger.Panicf("Limit of %d nested Exec calls reached while trying to execute %s",
 			e.t.IncludeLimit, path)

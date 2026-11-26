@@ -163,9 +163,9 @@ var callCases = []callCase{
 	{name: "spaces trimmed", files: page("${ If(u, `x`) }"),
 		stash: Stash{"u": true}, want: "x"},
 	{name: "missing condition", files: page("${If(u, `x`)}"),
-		stash: Stash{}, panics: "If(u, `x`): condition u is <nil>, not bool"},
+		stash: Stash{}, panics: "If(u, `x`): argument 1 (u) is <nil>, not bool"},
 	{name: "string condition", files: page("${If(u, `x`)}"),
-		stash: Stash{"u": "yes"}, panics: "condition u is string, not bool"},
+		stash: Stash{"u": "yes"}, panics: "argument 1 (u) is string, not bool"},
 	{name: "exec literal", files: map[string]string{"page.htm": "[${Exec(`p`)}]", "p.htm": "${title}"},
 		stash: Stash{"title": "T"}, want: "[T]"},
 	{name: "exec key", files: map[string]string{"page.htm": "[${Exec(form)}]", "p.htm": "P"},
@@ -175,7 +175,7 @@ var callCases = []callCase{
 	{name: "exec in if", files: map[string]string{"page.htm": "[${If(u, Exec(`p`))}]", "p.htm": "P"},
 		stash: Stash{"u": true}, want: "[P]"},
 	{name: "path not string", files: page("${Exec(form)}"),
-		stash: Stash{"form": 5}, panics: "Exec(form): path form is int, not string"},
+		stash: Stash{"form": 5}, panics: "Exec(form): argument 1 (form) is int, not string"},
 	{name: "exec cycle", files: page("${Exec(`page`)}"),
 		stash: Stash{}, panics: "nested Exec calls reached while trying to execute page"},
 }
@@ -268,5 +268,67 @@ func TestExecMissingFile(t *testing.T) {
 	_, err := newIn(t, root, tagsPair).Exec(&out, "page", Stash{})
 	if err == nil || !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("the error must contain %q, got %v", "missing", err)
+	}
+}
+
+// argCase is one case of [TestArg]: the value of the only argument `a` of the
+// call F(a), the function, which takes it with [arg] of some type, and the
+// expected value or a part of the expected panic.
+type argCase struct {
+	name   string
+	value  any
+	take   func(c *call, args []any) any
+	want   any
+	panics string
+}
+
+func takeBool(c *call, args []any) any   { return arg[bool](c, args, 0) }
+func takeAny(c *call, args []any) any    { return arg[any](c, args, 0) }
+func takeString(c *call, args []any) any { return arg[string](c, args, 0) }
+
+// argCases are the cases of [TestArg].
+var argCases = []argCase{
+	{name: "bool", value: true, take: takeBool, want: true},
+	{name: "nil to any", value: nil, take: takeAny, want: nil},
+	{name: "nil to bool", value: nil, take: takeBool, panics: "F(a): argument 1 (a) is <nil>, not bool"},
+	{name: "string to bool", value: "yes", take: takeBool, panics: "argument 1 (a) is string, not bool"},
+	{name: "int to string", value: 5, take: takeString, panics: "argument 1 (a) is int, not string"},
+}
+
+// TestArg checks that [arg] returns an argument of the right type, passes nil
+// to an interface type and panics with one message for a wrong type.
+func TestArg(t *testing.T) {
+	c := &call{text: "F(a)", args: []argument{{kind: argKey, text: "a"}}}
+	for _, ac := range argCases {
+		t.Run(ac.name, func(t *testing.T) {
+			var got any
+			msg := panicMessage(func() { got = ac.take(c, []any{ac.value}) })
+			if ac.panics != "" {
+				if !strings.Contains(msg, ac.panics) {
+					t.Fatalf("the panic must contain %q, got %q", ac.panics, msg)
+				}
+				return
+			}
+			if msg != "" {
+				t.Fatalf("unexpected panic: %s", msg)
+			}
+			if got != ac.want {
+				t.Fatalf("got %#v, want %#v", got, ac.want)
+			}
+		})
+	}
+}
+
+// TestFn1 checks that [fn1] makes a builtin from a Go function with one typed
+// parameter and writes its result.
+func TestFn1(t *testing.T) {
+	b := fn1(strings.ToUpper)
+	c := &call{text: "U(a)", fn: b, args: []argument{{kind: argKey, text: "a"}}}
+	var out strings.Builder
+	if _, err := c.run(&execution{stash: Stash{"a": "x"}}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if b.arity != 1 || out.String() != "X" {
+		t.Fatalf("arity %d, output %q; want 1, %q", b.arity, out.String(), "X")
 	}
 }
