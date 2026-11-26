@@ -347,6 +347,11 @@ func (t *Gledki) loadCompiled(fullPath string) (*compiledTemplate, error) {
 		return nil, fmt.Errorf("compiled file %s: start tag %q without end tag",
 			fullPath+CompiledSuffix, t.Tags[0])
 	}
+	if compiledT.callErr != nil {
+		// Compile it again from the template files, so that the wrong call
+		// is reported with the template file and the line.
+		return nil, fmt.Errorf("compiled file %s: %w", fullPath+CompiledSuffix, compiledT.callErr)
+	}
 	t.compiled.store(fullPath, compiledT)
 	return compiledT, nil
 }

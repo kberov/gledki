@@ -27,12 +27,28 @@ import (
 // Execute: Execute will take the stash as an argument and Exec will be
 // removed.
 func (t *Gledki) Exec(w io.Writer, path string, stash Stash) (int64, error) {
+	return t.exec(w, path, stash, 0)
+}
+
+// exec does the work of [Gledki.Exec]. `depth` is how many calls of the
+// builtin Exec deep the template file `path` is executed (0 for Gledki.Exec).
+// For every tag it writes the value from `stash`, when `stash` has the key
+// (even with a nil value); otherwise it runs the ready call of a builtin, if
+// the tag is one (see [call.run]); otherwise it writes nothing.
+func (t *Gledki) exec(w io.Writer, path string, stash Stash, depth int) (int64, error) {
 	compiledT, err := t.compile(path)
 	if err != nil {
 		return 0, err
 	}
+	e := &execution{t: t, stash: stash, depth: depth}
 	f := func(w io.Writer, tag string) (int, error) {
-		return stashTagFunc(w, tag, stash)
+		if v, ok := stash[tag]; ok {
+			return writeValue(w, tag, v)
+		}
+		if c := compiledT.calls[tag]; c != nil {
+			return c.run(e, w)
+		}
+		return 0, nil
 	}
 	if compiledT.tpl == nil {
 		// A start tag without an end tag: it is written as it is, as in v0.7.8.

@@ -57,10 +57,57 @@ func init() {
 		panic("not implemented")
 	}
 	builtins = map[string]*builtin{
-		"If":     {arity: 2, run: notImplemented},
-		"IfElse": {arity: 3, run: notImplemented},
+		"If":     {arity: 2, run: runIf},
+		"IfElse": {arity: 3, run: runIfElse},
 		"Exec":   {arity: 1, run: notImplemented},
 	}
+}
+
+// run runs the call `c` in the execution `e` and writes its output to `w`.
+// The arguments get their values first: a stash key the value from the stash
+// (nil, when the stash has no such key), a literal its text, and a nested
+// call a [TagFunc], which runs the nested call only when it is written.
+func (c *call) run(e *execution, w io.Writer) (int, error) {
+	args := make([]any, len(c.args))
+	for i, a := range c.args {
+		switch a.kind {
+		case argKey:
+			args[i] = e.stash[a.text]
+		case argLiteral:
+			args[i] = a.text
+		case argCall:
+			args[i] = a.call.tagFunc(e)
+		}
+	}
+	return c.fn.run(e, w, c, args)
+}
+
+// tagFunc returns a [TagFunc], which runs the call `c` in the execution `e`.
+func (c *call) tagFunc(e *execution) TagFunc {
+	return func(w io.Writer, _ string) (int, error) {
+		return c.run(e, w)
+	}
+}
+
+// condition returns the first argument of the call `c` as a bool. It panics,
+// when the value is not a bool (also when the stash has no such key): a
+// missing value silently taken as false would hide a typo in the template.
+func (c *call) condition(args []any) bool {
+	cond, ok := args[0].(bool)
+	if !ok {
+		panic(fmt.Sprintf("%s: condition %s is %T, not bool", c.text, c.args[0].text, args[0]))
+	}
+	return cond
+}
+
+// runIf runs [If] called from a template: ${If(cond, stmt)}.
+func runIf(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	return If(c.condition(args), args[1])(w, c.text)
+}
+
+// runIfElse runs [IfElse] called from a template: ${IfElse(cond, then, els)}.
+func runIfElse(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	return IfElse(c.condition(args), args[1], args[2])(w, c.text)
 }
 
 // errUnknownFunc is wrapped by the error of [parseCall] for a call of a

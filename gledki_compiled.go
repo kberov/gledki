@@ -1,6 +1,7 @@
 package gledki
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,6 +21,15 @@ import (
 type compiledTemplate struct {
 	text string
 	tpl  *fasttemplate.Template
+	// calls are the ready calls of builtins in the compiled text, by the tag
+	// content. They are only read after parse, so many goroutines can use
+	// them at the same time.
+	calls map[string]*call
+	// callErr is the first wrong call of a builtin in the compiled text. It
+	// can only be found in a compiled file, which was changed by hand or
+	// written by an older version: preprocess does not let a wrong call into
+	// a compiled text.
+	callErr error
 	// tagErr is the first problem, found in the template texts while
 	// compiling – a start tag without an end tag or a call of an unknown
 	// function – with the template file and the line.
@@ -58,14 +68,52 @@ func (c *compiledMap) delete(path string) {
 }
 
 // parse parses the compiled text `text` into a parsed template with the
-// [Gledki.Tags] of this instance and returns both as a compiled template. If a
-// start tag has no end tag, the parsed template is nil.
+// [Gledki.Tags] of this instance and returns both as a compiled template,
+// together with the ready calls in it (see [Gledki.parseCalls]). If a start
+// tag has no end tag, the parsed template is nil and no calls are made.
 func (t *Gledki) parse(text string) *compiledTemplate {
 	compiledT := &compiledTemplate{text: text}
 	if tpl, err := fasttemplate.NewTemplate(text, t.Tags[0], t.Tags[1]); err == nil {
 		compiledT.tpl = tpl
+		t.parseCalls(compiledT)
 	}
 	return compiledT
+}
+
+// parseCalls finds every tag in the compiled text of `compiledT` and keeps
+// the ready calls of builtins in compiledT.calls. Only a tag content with "("
+// is given to [parseCall], so the other placeholders cost nothing more than
+// finding them. The first wrong call is kept in compiledT.callErr; a call of
+// an unknown function stays a placeholder.
+func (t *Gledki) parseCalls(compiledT *compiledTemplate) {
+	start, end := t.Tags[0], t.Tags[1]
+	text := compiledT.text
+	for {
+		i := strings.Index(text, start)
+		if i < 0 {
+			return
+		}
+		text = text[i+len(start):]
+		j := strings.Index(text, end)
+		if j < 0 {
+			return
+		}
+		content := text[:j]
+		text = text[j+len(end):]
+		if !strings.Contains(content, "(") {
+			continue
+		}
+		c, err := parseCall(content)
+		switch {
+		case c != nil:
+			if compiledT.calls == nil {
+				compiledT.calls = make(map[string]*call)
+			}
+			compiledT.calls[content] = c
+		case err != nil && !errors.Is(err, errUnknownFunc) && compiledT.callErr == nil:
+			compiledT.callErr = err
+		}
+	}
 }
 
 // tagCheck keeps the first problem, found in the template texts of one

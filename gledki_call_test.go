@@ -2,7 +2,9 @@ package gledki
 
 import (
 	"errors"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/gommon/log"
@@ -126,4 +128,121 @@ func TestUnknownFunctionWarning(t *testing.T) {
 	if msg := panicMessage(func() { tpls.MustCompile("page") }); !strings.Contains(msg, want) {
 		t.Errorf("MustCompile must panic with %q, got %q", want, msg)
 	}
+}
+
+// callCase is one case of [TestCalls]: the template files to write (the main
+// one is always `page.htm`), the stash to execute `page` with, and the
+// expected output or a part of the expected panic.
+type callCase struct {
+	name   string
+	files  map[string]string
+	stash  Stash
+	want   string
+	panics string
+}
+
+// page returns the files of a case with only the main template text `text`.
+func page(text string) map[string]string { return map[string]string{"page.htm": text} }
+
+// callCases are the cases of [TestCalls].
+var callCases = []callCase{
+	{name: "ifelse true", files: page("<img src=\"${IfElse(u, `/a.svg`, `/b.svg`)}\">"),
+		stash: Stash{"u": true}, want: `<img src="/a.svg">`},
+	{name: "ifelse false", files: page("<img src=\"${IfElse(u, `/a.svg`, `/b.svg`)}\">"),
+		stash: Stash{"u": false}, want: `<img src="/b.svg">`},
+	{name: "if with key", files: page("[${If(u, name)}]"),
+		stash: Stash{"u": true, "name": "N"}, want: "[N]"},
+	{name: "if false", files: page("[${If(u, name)}]"),
+		stash: Stash{"u": false, "name": "N"}, want: "[]"},
+	{name: "missing value", files: page("[${If(u, name)}]"),
+		stash: Stash{"u": true}, want: "[]"},
+	{name: "stash wins", files: page("${If(u, `x`)}"),
+		stash: Stash{"If(u, `x`)": "S", "u": true}, want: "S"},
+	{name: "stash nil wins", files: page("${If(u, `x`)}"),
+		stash: Stash{"If(u, `x`)": nil, "u": true}, want: ""},
+	{name: "spaces trimmed", files: page("${ If(u, `x`) }"),
+		stash: Stash{"u": true}, want: "x"},
+	{name: "missing condition", files: page("${If(u, `x`)}"),
+		stash: Stash{}, panics: "If(u, `x`): condition u is <nil>, not bool"},
+	{name: "string condition", files: page("${If(u, `x`)}"),
+		stash: Stash{"u": "yes"}, panics: "condition u is string, not bool"},
+}
+
+// TestCalls checks the calls of builtins, executed by [Gledki.Exec].
+func TestCalls(t *testing.T) {
+	for _, c := range callCases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFiles(t, root, c.files)
+			tpls := newIn(t, root, tagsPair)
+			var out strings.Builder
+			msg := panicMessage(func() {
+				if _, err := tpls.Exec(&out, "page", c.stash); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if c.panics != "" {
+				if !strings.Contains(msg, c.panics) {
+					t.Fatalf("the panic must contain %q, got %q", c.panics, msg)
+				}
+				return
+			}
+			if msg != "" {
+				t.Fatalf("unexpected panic: %s", msg)
+			}
+			if out.String() != c.want {
+				t.Fatalf("got %q, want %q", out.String(), c.want)
+			}
+		})
+	}
+}
+
+// TestCallsFromCompiledFile checks that the calls work also when the compiled
+// template is read from the compiled file, and that a compiled file with a
+// wrong call is not used.
+func TestCallsFromCompiledFile(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, page("${If(u, `x`)}"))
+	exec := func() string {
+		var out strings.Builder
+		if _, err := newIn(t, root, tagsPair).Exec(&out, "page", Stash{"u": true}); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := exec(); got != "x" {
+		t.Fatalf("first: got %q", got)
+	}
+	if got := exec(); got != "x" {
+		t.Fatalf("from the compiled file: got %q", got)
+	}
+	compiledFile := newIn(t, root, tagsPair).toFullPath("page") + CompiledSuffix
+	if err := os.WriteFile(compiledFile, []byte("${If(u)}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := exec(); got != "x" {
+		t.Fatalf("from a wrong compiled file: got %q", got)
+	}
+}
+
+// TestCallsConcurrent checks that many goroutines can execute the same
+// template with calls at the same time, each with its own stash.
+func TestCallsConcurrent(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, page("${IfElse(u, `T`, `F`)}"))
+	tpls := newIn(t, root, tagsPair)
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Go(func() {
+			want := map[bool]string{true: "T", false: "F"}[i%2 == 0]
+			var out strings.Builder
+			if _, err := tpls.Exec(&out, "page", Stash{"u": i%2 == 0}); err != nil {
+				t.Error(err)
+			}
+			if out.String() != want {
+				t.Errorf("goroutine %d: got %q, want %q", i, out.String(), want)
+			}
+		})
+	}
+	wg.Wait()
 }
