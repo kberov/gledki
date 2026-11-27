@@ -46,7 +46,14 @@ type builtin struct {
 type execution struct {
 	t     *Gledki
 	stash Stash
-	depth int // how many Exec calls deep
+	// top is the execution of the [Gledki.Exec] called by the program; it is
+	// the execution itself there and the same for all nested Exec calls.
+	top *execution
+	// depth is how many calls of the builtin Exec are running now; only the
+	// depth of top is used. It counts the calls, which really run, not where
+	// they were written, because a nested call can be kept with Set and run
+	// later, from inside another template.
+	depth int
 }
 
 // builtins are the functions, which can be called from a template, by name.
@@ -285,16 +292,20 @@ func source(content string, n ast.Node) string {
 	return content[n.Pos()-1 : n.End()-1]
 }
 
-// runExec runs [Gledki.Exec] called from a template: ${Exec(`path`)} or
+// runExec runs [Gledki.Exec] called from a template: ${Exec(`path/file`)} or
 // ${Exec(key)}. The template file is executed with the same stash, one Exec
-// call deeper. The path must be a string; nested Exec calls are limited by
-// [Gledki.IncludeLimit], so a cycle panics instead of never ending.
+// call deeper. The path must be a string; the running nested Exec calls are
+// limited by [Gledki.IncludeLimit], so a cycle panics instead of never ending,
+// also when it goes through a value kept with Set.
 func runExec(e *execution, w io.Writer, c *call, args []any) (int, error) {
 	path := arg[string](c, args, 0)
-	if e.depth+1 > e.t.IncludeLimit {
+	top := e.top
+	if top.depth+1 > e.t.IncludeLimit {
 		e.t.Logger.Panicf("Limit of %d nested Exec calls reached while trying to execute %s",
 			e.t.IncludeLimit, path)
 	}
-	n, err := e.t.exec(w, path, e.stash, e.depth+1)
+	top.depth++
+	defer func() { top.depth-- }()
+	n, err := e.t.exec(w, path, e.stash, top)
 	return int(n), err
 }

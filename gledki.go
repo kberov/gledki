@@ -131,7 +131,9 @@ and call them like the builtins:
 The stash of the current execution is passed first, and the function may also
 write to it: a written value is seen by the tags after the call and by the
 templates executed with Exec after it. A written key, equal to the content of a
-later call tag, wins over that call, as any stash key does.
+later call tag, wins over that call, as any stash key does. So, as with Set, a
+stash must not be shared by executions, which run at the same time (see
+[Gledki.Exec]).
 */
 package gledki
 

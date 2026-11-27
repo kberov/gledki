@@ -72,6 +72,12 @@ var funcCases = []callCase{
 		stash: Stash{}, want: "[][T]"},
 	{name: "set bool for if", files: page("${Set(`u`, flag)}${If(u, `x`)}"),
 		stash: Stash{"flag": true}, want: "x"},
+	{name: "set exec cycle", files: map[string]string{
+		"page.htm": "${Set(`x`, Exec(`p`))}${x}", "p.htm": "${x}"},
+		stash: Stash{}, panics: "nested Exec calls reached while trying to execute p"},
+	{name: "set exec written twice", files: map[string]string{
+		"page.htm": "${Set(`x`, Exec(`p`))}[${x}${x}]", "p.htm": "P"},
+		stash: Stash{}, want: "[PP]"},
 	{name: "set key not string", files: page("${Set(k, `T`)}"),
 		stash: Stash{"k": 5}, panics: "argument 1 (k) is int, not string"},
 }
