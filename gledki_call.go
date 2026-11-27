@@ -57,7 +57,19 @@ func init() {
 		"If":     fn2(If),
 		"IfElse": fn3(IfElse),
 		"Exec":   {arity: 1, run: runExec},
+		"Set":    StashFunc2(set).b,
 	}
+}
+
+// set is the builtin Set: ${Set(`key`, value)} writes `v` under `key` in the
+// stash `s` and writes nothing. The tags after it and the templates executed
+// with Exec after it see the value. It panics, when the stash is nil.
+func set(s Stash, key string, v any) TagFunc {
+	if s == nil {
+		panic(fmt.Sprintf("Set(%q): the stash is nil", key))
+	}
+	s[key] = v
+	return noop
 }
 
 // run runs the call `c` in the execution `e` and writes its output to `w`.
@@ -115,7 +127,7 @@ func arg[T any](c *call, args []any, i int) T {
 // [TagFunc]).
 func fn1[A, R any](f func(A) R) *builtin {
 	return &builtin{arity: 1, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(arg[A](c, args, 0)))(w, c.text)
+		return writeValue(w, c.text, f(arg[A](c, args, 0)))
 	}}
 }
 
@@ -123,7 +135,7 @@ func fn1[A, R any](f func(A) R) *builtin {
 // [fn1].
 func fn2[A, B, R any](f func(A, B) R) *builtin {
 	return &builtin{arity: 2, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(arg[A](c, args, 0), arg[B](c, args, 1)))(w, c.text)
+		return writeValue(w, c.text, f(arg[A](c, args, 0), arg[B](c, args, 1)))
 	}}
 }
 
@@ -131,7 +143,7 @@ func fn2[A, B, R any](f func(A, B) R) *builtin {
 // [fn1].
 func fn3[A, B, C, R any](f func(A, B, C) R) *builtin {
 	return &builtin{arity: 3, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(arg[A](c, args, 0), arg[B](c, args, 1), arg[C](c, args, 2)))(w, c.text)
+		return writeValue(w, c.text, f(arg[A](c, args, 0), arg[B](c, args, 1), arg[C](c, args, 2)))
 	}}
 }
 

@@ -47,7 +47,7 @@ func Func(name string, fn Function) {
 // written like a stash value (nil, string, []byte or [TagFunc]).
 func StashFunc0[R any](f func(Stash) R) Function {
 	return Function{&builtin{arity: 0, run: func(e *execution, w io.Writer, c *call, _ []any) (int, error) {
-		return value(f(e.stash))(w, c.text)
+		return writeValue(w, c.text, f(e.stash))
 	}}}
 }
 
@@ -56,7 +56,7 @@ func StashFunc0[R any](f func(Stash) R) Function {
 // count of arguments in the template, without the stash. See [StashFunc0].
 func StashFunc1[A, R any](f func(Stash, A) R) Function {
 	return Function{&builtin{arity: 1, run: func(e *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(e.stash, arg[A](c, args, 0)))(w, c.text)
+		return writeValue(w, c.text, f(e.stash, arg[A](c, args, 0)))
 	}}}
 }
 
@@ -65,6 +65,6 @@ func StashFunc1[A, R any](f func(Stash, A) R) Function {
 // [StashFunc0].
 func StashFunc2[A, B, R any](f func(Stash, A, B) R) Function {
 	return Function{&builtin{arity: 2, run: func(e *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(e.stash, arg[A](c, args, 0), arg[B](c, args, 1)))(w, c.text)
+		return writeValue(w, c.text, f(e.stash, arg[A](c, args, 0), arg[B](c, args, 1)))
 	}}}
 }

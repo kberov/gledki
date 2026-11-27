@@ -2,6 +2,7 @@ package gledki
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -59,6 +60,20 @@ var funcCases = []callCase{
 		stash: Stash{"u": true, "t": "1"}, want: "[selected]"},
 	{name: "wrong argument type", files: page("${Upper(v)}"),
 		stash: Stash{"v": 5}, panics: "template \"page\": Upper(v): argument 1 (v) is int, not string"},
+	{name: "set literal", files: page("${Set(`t`, `T`)}[${t}]"), stash: Stash{}, want: "[T]"},
+	{name: "set from key", files: page("${Set(`t`, name)}[${t}]"),
+		stash: Stash{"name": "N"}, want: "[N]"},
+	{name: "set before and after", files: page("[${t}]${Set(`t`, `T`)}[${t}]"),
+		stash: Stash{}, want: "[][T]"},
+	{name: "set not written", files: page("${If(u, Set(`t`, `T`))}[${t}]"),
+		stash: Stash{"u": false}, want: "[]"},
+	{name: "set in exec", files: map[string]string{
+		"page.htm": "[${t}]${Exec(`p`)}[${t}]", "p.htm": "${Set(`t`, `T`)}"},
+		stash: Stash{}, want: "[][T]"},
+	{name: "set bool for if", files: page("${Set(`u`, flag)}${If(u, `x`)}"),
+		stash: Stash{"flag": true}, want: "x"},
+	{name: "set key not string", files: page("${Set(k, `T`)}"),
+		stash: Stash{"k": 5}, panics: "argument 1 (k) is int, not string"},
 }
 
 // TestFuncCalls checks the calls of the functions of the user, registered
@@ -91,6 +106,7 @@ var funcPanicCases = []funcPanicCase{
 	{name: "a b", fn: StashFunc0(hello), panics: `gledki.Func("a b"): not a Go identifier`},
 	{name: "If", fn: StashFunc0(hello), panics: `gledki.Func("If"): already registered`},
 	{name: "Pick", fn: StashFunc0(hello), panics: `gledki.Func("Pick"): already registered`},
+	{name: "Set", fn: StashFunc0(hello), panics: `gledki.Func("Set"): already registered`},
 }
 
 // TestFuncPanics checks that [Func] refuses a wrong registration.
@@ -127,5 +143,46 @@ func TestFuncAfterCompile(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "unknown function Late") {
 		t.Fatalf("Late must not be registered; the warning is %q", logged.String())
+	}
+}
+
+// TestSetNilStash checks that Set panics with the template and the key, when
+// the stash is nil.
+func TestSetNilStash(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, page("${Set(`t`, `T`)}"))
+	tpls := newIn(t, root, tagsPair)
+	var out strings.Builder
+	msg := panicMessage(func() { _, _ = tpls.Exec(&out, "page", nil) })
+	const want = `template "page": Set("t"): the stash is nil`
+	if !strings.Contains(msg, want) {
+		t.Fatalf("the panic must contain %q, got %q", want, msg)
+	}
+}
+
+// BenchmarkCallKinds compares a call of a builtin (IfElse) with a call of a
+// function of the user (Pick).
+func BenchmarkCallKinds(b *testing.B) {
+	kinds := []struct{ name, tag string }{
+		{"IfElse", "${IfElse(u, `a`, `b`)}"},
+		{"Pick", "${Pick(`t`, `1`)}"},
+	}
+	stash := Stash{"u": true, "t": "1"}
+	for _, k := range kinds {
+		b.Run(k.name, func(b *testing.B) {
+			root := b.TempDir()
+			writeFiles(b, root, page(strings.Repeat(k.tag, 20)))
+			tpls := newIn(b, root, tagsPair)
+			if _, err := tpls.Exec(io.Discard, "page", stash); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := tpls.Exec(io.Discard, "page", stash); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
