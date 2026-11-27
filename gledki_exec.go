@@ -80,9 +80,16 @@ func (t *Gledki) exec(w io.Writer, path string, stash Stash, top *execution) (in
 // so a nested Exec shows the whole chain:
 //
 //	template "page": template "partials/form": If(u, `x`): argument 1 (u) is <nil>, not bool
+//
+// A panic with an error stays an error, which wraps it, so [errors.Is] and
+// [errors.As] find it, when the panic is recovered; any other value becomes a
+// string.
 func runIn(path string, c *call, e *execution, w io.Writer) (int, error) {
 	defer func() {
 		if r := recover(); r != nil {
+			if err, ok := r.(error); ok {
+				panic(fmt.Errorf("template %q: %w", path, err))
+			}
 			panic(fmt.Sprintf("template %q: %v", path, r))
 		}
 	}()

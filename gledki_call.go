@@ -168,9 +168,6 @@ var errUnknownFunc = errors.New("unknown function")
 //     expression, which is not a call, but contains one (see [builtinInside]);
 //   - the ready call otherwise.
 func parseCall(content string) (*call, error) {
-	if !builtinsRead.Load() {
-		builtinsRead.Store(true)
-	}
 	expr, err := parser.ParseExpr(content)
 	if err != nil {
 		if startsWithBuiltin(content) {
@@ -280,7 +277,7 @@ func callArgument(content string, ce *ast.CallExpr) (argument, error) {
 func notAllowed(content string, n ast.Node) error {
 	if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.NOT {
 		x := source(content, u.X)
-		return fmt.Errorf("%s is not allowed in a call; write Unless(%s, …) instead of If(!%s, …), IfElse(%s, y, x) instead of IfElse(!%s, x, y)",
+		return fmt.Errorf("%s is not allowed in a call; write Unless(%s, …) instead of If(!%s, …), IfElse(%s, <b>, <a>) instead of IfElse(!%s, <a>, <b>)",
 			source(content, n), x, x, x, x)
 	}
 	return fmt.Errorf("%s is not allowed in a call; only stash keys, string literals and calls are",

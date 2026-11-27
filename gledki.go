@@ -103,20 +103,22 @@ result is written at the place of the tag, as a stash value is: a TagFunc is
 called with the writer. So If and IfElse are higher-order functions: they take
 functions and return a function, and nothing is executed until a TagFunc is
 called with the writer. A function of the user gets a nested call as a TagFunc
-too, so its parameter for it must be any or TagFunc.
+too, so its parameter for it must be any or TagFunc. Set keeps such a TagFunc
+as it is, not what it writes: after ${Set(`x`, Exec(`p`))} every ${x} executes
+the file `p` again, and after ${Set(`x`, If(u, `a`))} every ${x} reads u again.
 
 # Functions of the user
 
 The program can register its own functions for the templates with [Func], made
 ready by one of the adapters [StashFunc0], [StashFunc1] and [StashFunc2] (the
-number is the count of arguments in the template).  Register them in init(),
+number is the count of arguments in the template). Register them in init(),
 before any template is compiled:
 
 	func init() {
 		gledki.Func("Selected", gledki.StashFunc2(selected))
 	}
 
-	// selected returns "selected", when the value of key in the stash is want.
+	// selected returns "selected", when the value of `key` in the stash is `want`.
 	func selected(s gledki.Stash, key, want string) string {
 		if fmt.Sprint(s[key]) == want {
 			return "selected"
@@ -126,7 +128,7 @@ before any template is compiled:
 
 and call them like the builtins:
 
-	<option ${Selected(`currency`, `BGN`)}>BGN</option>.
+	<option ${Selected(`currency`, `BGN`)}>BGN</option>
 
 The stash of the current execution is passed first, and the function may also
 write to it: a written value is seen by the tags after the call and by the
@@ -385,6 +387,9 @@ func (t *Gledki) MustCompile(path string) string {
 // [Gledki.Compile] returns only the compiled text; [Gledki.Execute] executes
 // the parsed template.
 func (t *Gledki) compile(path string) (compiledT *compiledTemplate, err error) {
+	if !builtinsRead.Load() {
+		builtinsRead.Store(true)
+	}
 	path = t.toFullPath(path)
 	if CacheTemplates {
 		if compiledT, err = t.loadCompiled(path); err == nil {

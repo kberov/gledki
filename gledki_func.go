@@ -12,9 +12,10 @@ import (
 // with [Func]. The zero Function is not a function.
 type Function struct{ b *builtin }
 
-// builtinsRead is set, when [parseCall] reads [builtins] for the first time.
-// From then on [Func] refuses to register, so builtins is only read while
-// many goroutines compile templates, without a lock.
+// builtinsRead is set at the start of the first compile of a template (see
+// [Gledki.compile]), before [parseCall] reads [builtins]. From then on [Func]
+// refuses to register, so builtins is only read while many goroutines compile
+// templates, without a lock.
 var builtinsRead atomic.Bool
 
 // Func registers the function `fn` under `name` for all templates of all
@@ -24,6 +25,10 @@ var builtinsRead atomic.Bool
 // compiled, when `name` is not a Go identifier or is already registered (also
 // the builtins If, IfElse, Unless, Exec and Set), and when `fn` is the zero
 // [Function].
+//
+// Func is not safe for concurrent use. The init() functions of a program run
+// one after another in one goroutine, before main, so registering there is
+// safe.
 //
 // The function gets the stash of the current execution as its first
 // argument. It may read and write it: a written value is seen by the tags

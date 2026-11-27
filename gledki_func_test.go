@@ -1,6 +1,7 @@
 package gledki
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +23,14 @@ func registerTestFuncs() {
 	Func("Hello", StashFunc0(hello))
 	Func("Upper", StashFunc1(upper))
 	Func("Mark", StashFunc1(mark))
+	Func("Fail", StashFunc0(fail))
 }
+
+// errFail is the panic value of [fail].
+var errFail = errors.New("failed on purpose")
+
+// fail panics with [errFail].
+func fail(Stash) string { panic(errFail) }
 
 // pick returns "selected", when the value of `key` in the stash is `want`.
 func pick(s Stash, key, want string) string {
@@ -78,6 +86,8 @@ var funcCases = []callCase{
 	{name: "set exec written twice", files: map[string]string{
 		"page.htm": "${Set(`x`, Exec(`p`))}[${x}${x}]", "p.htm": "P"},
 		stash: Stash{}, want: "[PP]"},
+	{name: "set key missing", files: page("${Set(k, `T`)}"),
+		stash: Stash{}, panics: "argument 1 (k) is <nil>, not string"},
 	{name: "set key not string", files: page("${Set(k, `T`)}"),
 		stash: Stash{"k": 5}, panics: "argument 1 (k) is int, not string"},
 }
@@ -114,6 +124,7 @@ var funcPanicCases = []funcPanicCase{
 	{name: "Pick", fn: StashFunc0(hello), panics: `gledki.Func("Pick"): already registered`},
 	{name: "Set", fn: StashFunc0(hello), panics: `gledki.Func("Set"): already registered`},
 	{name: "Unless", fn: StashFunc0(hello), panics: `gledki.Func("Unless"): already registered`},
+	{name: "Exec", fn: StashFunc0(hello), panics: `gledki.Func("Exec"): already registered`},
 }
 
 // TestFuncPanics checks that [Func] refuses a wrong registration.
@@ -191,5 +202,43 @@ func BenchmarkCallKinds(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// TestFuncAfterCompileWithoutTags checks that [Func] panics also after the
+// compile of a template without any tag. builtinsRead is cleared for the
+// test, as at the start of a program, and set again at its end.
+func TestFuncAfterCompileWithoutTags(t *testing.T) {
+	builtinsRead.Store(false)
+	t.Cleanup(func() { builtinsRead.Store(true) })
+	root := t.TempDir()
+	writeFiles(t, root, page("<p>no tags</p>"))
+	if _, err := newIn(t, root, tagsPair).Compile("page"); err != nil {
+		t.Fatal(err)
+	}
+	const want = "templates are already compiled"
+	if msg := panicMessage(func() { Func("Plain", StashFunc0(hello)) }); !strings.Contains(msg, want) {
+		t.Fatalf("the panic must contain %q, got %q", want, msg)
+	}
+}
+
+// TestPanicErrorKept checks that a panic with an error keeps the error, so
+// errors.Is finds it, and gets the chain of templates in front of its message.
+func TestPanicErrorKept(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{"page.htm": "${Exec(`p`)}", "p.htm": "${Fail()}"})
+	tpls := newIn(t, root, tagsPair)
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_, _ = tpls.Exec(io.Discard, "page", Stash{})
+	}()
+	err, ok := recovered.(error)
+	if !ok || !errors.Is(err, errFail) {
+		t.Fatalf("the panic must be an error wrapping errFail, got %#v", recovered)
+	}
+	const want = `template "page": template "p": failed on purpose`
+	if err.Error() != want {
+		t.Fatalf("got %q, want %q", err.Error(), want)
 	}
 }
