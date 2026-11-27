@@ -9,7 +9,9 @@ import (
 
 // Function is a Go function, made ready to be called from templates by one
 // of the adapters [StashFunc0], [StashFunc1] or [StashFunc2], and registered
-// with [Func]. The zero Function is not a function.
+// with [Func]. Only these adapters make a Function, which holds a function.
+// The zero value (`var f Function` or `Function{}`) holds none, and Func
+// panics with it.
 type Function struct{ b *builtin }
 
 // builtinsRead is set at the start of the first compile of a template (see
@@ -23,8 +25,8 @@ var builtinsRead atomic.Bool
 // ${Selected(`currency`, `EUR`)}. Register the functions in init() (or in
 // main before the first compile): Func panics, when any template was already
 // compiled, when `name` is not a Go identifier or is already registered (also
-// the builtins If, IfElse, Unless, Exec and Set), and when `fn` is the zero
-// [Function].
+// the builtins If, IfElse, Unless, Exec and Set), and when `fn` holds no
+// function (the zero [Function]).
 //
 // Func is not safe for concurrent use. The init() functions of a program run
 // one after another in one goroutine, before main, so registering there is
