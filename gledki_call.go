@@ -24,7 +24,10 @@ const (
 type argument struct {
 	kind argKind
 	text string
-	call *call
+	// value is the text of a literal, already put in an `any` when the
+	// template is compiled, so a call does not allocate for it every time.
+	value any
+	call  *call
 }
 
 // call is a ready call of a [builtin], parsed from a tag content, for
@@ -82,7 +85,8 @@ func set(s Stash, key string, v any) TagFunc {
 
 // run runs the call `c` in the execution `e` and writes its output to `w`.
 // The arguments get their values first: a stash key the value from the stash
-// (nil, when the stash has no such key), a literal its text, and a nested
+// (nil, when the stash has no such key), a literal its text (ready in
+// [argument.value]), and a nested
 // call a [TagFunc], which runs the nested call only when it is written.
 func (c *call) run(e *execution, w io.Writer) (int, error) {
 	args := make([]any, len(c.args))
@@ -91,7 +95,7 @@ func (c *call) run(e *execution, w io.Writer) (int, error) {
 		case argKey:
 			args[i] = keyValue(e.stash, a.text)
 		case argLiteral:
-			args[i] = a.text
+			args[i] = a.value
 		case argCall:
 			args[i] = a.call.tagFunc(e)
 		}
@@ -260,7 +264,7 @@ func literalArgument(content string, lit *ast.BasicLit) (argument, error) {
 	if err != nil {
 		return argument{}, fmt.Errorf("cannot unquote %s: %v", lit.Value, err)
 	}
-	return argument{kind: argLiteral, text: text}, nil
+	return argument{kind: argLiteral, text: text, value: text}, nil
 }
 
 // callArgument makes an argument from a nested call of a builtin.

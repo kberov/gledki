@@ -364,3 +364,23 @@ func TestFn1(t *testing.T) {
 		t.Fatalf("arity %d, output %q; want 1, %q", b.arity, out.String(), "X")
 	}
 }
+
+// TestCallLiteralAllocs checks that a literal argument costs no allocation,
+// when the call runs: it allocates as much as the same call with stash keys,
+// whose values are already in the stash.
+func TestCallLiteralAllocs(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"lit.htm": "${IfElse(u, `a`, `b`)}", "key.htm": "${IfElse(u, a, b)}"})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"u": true, "a": "a", "b": "b"}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
+	}
+	if lit, key := allocs("lit"), allocs("key"); lit != key {
+		t.Fatalf("a call with literals allocates %v times, with stash keys %v times", lit, key)
+	}
+}
