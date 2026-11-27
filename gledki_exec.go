@@ -1,6 +1,7 @@
 package gledki
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/valyala/fasttemplate"
@@ -51,7 +52,7 @@ func (t *Gledki) exec(w io.Writer, path string, stash Stash, depth int) (int64, 
 			return writeValue(w, tag, v)
 		}
 		if c := compiledT.calls[tag]; c != nil {
-			return c.run(e, w)
+			return runIn(path, c, e, w)
 		}
 		return 0, nil
 	}
@@ -60,4 +61,18 @@ func (t *Gledki) exec(w io.Writer, path string, stash Stash, depth int) (int64, 
 		return fasttemplate.ExecuteFunc(compiledT.text, t.Tags[0], t.Tags[1], w, f)
 	}
 	return compiledT.tpl.ExecuteFunc(w, f)
+}
+
+// runIn runs the call `c` of the template `path` in the execution `e`. A
+// panic of the call gets the name of the template in front of its message,
+// so a nested Exec shows the whole chain:
+//
+//	template "page": template "partials/form": If(u, `x`): argument 1 (u) is <nil>, not bool
+func runIn(path string, c *call, e *execution, w io.Writer) (int, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			panic(fmt.Sprintf("template %q: %v", path, r))
+		}
+	}()
+	return c.run(e, w)
 }
