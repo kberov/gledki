@@ -96,13 +96,15 @@ itself, starts the count again.
 
 When the execution reaches a call tag, three things happen. First the arguments
 get their values: a stash key its value, a literal its text and a nested call a
-TagFunc, which runs that call. Then the function is called with these values;
-it returns a value to write (nil, string, []byte or TagFunc). If and IfElse,
-for example, return a TagFunc, which writes the chosen argument. Last, the
-result is written at the place of the tag, as a stash value is: a TagFunc is
-called with the writer. So If and IfElse are higher-order functions: they take
-functions and return a function, and nothing is executed until a TagFunc is
-called with the writer. A function of the user gets a nested call as a TagFunc
+TagFunc, which runs that call. Then the function is called with these values.
+Last, its result is written at the place of the tag, as a stash value is (nil,
+string, []byte or TagFunc): a TagFunc is called with the writer. If, IfElse and
+Unless choose one of their arguments and write it there, so a nested call,
+which is not chosen, is never run. So the calls are higher-order functions:
+they take functions, and nothing is executed until a TagFunc is called with
+the writer. (The Go functions [If], [IfElse] and [Unless], used in a stash,
+return a TagFunc, which writes the chosen argument; in a template the choice
+is written at once, without making it.) A function of the user gets a nested call as a TagFunc
 too, so its parameter for it must be any or TagFunc. Set keeps such a TagFunc
 as it is, not what it writes: after ${Set(`x`, Exec(`p`))} every ${x} executes
 the file `p` again, and after ${Set(`x`, If(u, `a`))} every ${x} reads u again.

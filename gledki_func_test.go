@@ -242,3 +242,36 @@ func TestPanicErrorKept(t *testing.T) {
 		t.Fatalf("got %q, want %q", err.Error(), want)
 	}
 }
+
+// TestFuncAllocs checks that a call of a function of the user, which returns
+// a string, allocates only the slice of its arguments, as a call of If does.
+func TestFuncAllocs(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"plain.htm": "<p>x</p>",
+		"pick.htm":  "<p ${Pick(`t`, `1`)}>",
+		"upper.htm": "<p>${Upper(`ab`)}</p>",
+		"hello.htm": "<p>${Hello()}</p>",
+	})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"t": "1", "name": "Ana"}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
+	}
+	plain := allocs("plain")
+	for _, c := range []struct {
+		path string
+		want float64
+	}{
+		{"pick", 1},  // the slice of the arguments
+		{"upper", 3}, // the slice, and the string and the []byte of upper
+		{"hello", 2}, // the two strings of hello (no arguments: no slice)
+	} {
+		if got := allocs(c.path) - plain; got != c.want {
+			t.Errorf("%s allocates %v times more than a page without calls, want %v", c.path, got, c.want)
+		}
+	}
+}

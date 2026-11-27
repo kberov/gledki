@@ -351,20 +351,6 @@ func TestArg(t *testing.T) {
 	}
 }
 
-// TestFn1 checks that [fn1] makes a builtin from a Go function with one typed
-// parameter and writes its result.
-func TestFn1(t *testing.T) {
-	b := fn1(strings.ToUpper)
-	c := &call{text: "U(a)", fn: b, args: []argument{{kind: argKey, text: "a"}}}
-	var out strings.Builder
-	if _, err := c.run(&execution{stash: Stash{"a": "x"}}, &out); err != nil {
-		t.Fatal(err)
-	}
-	if b.arity != 1 || out.String() != "X" {
-		t.Fatalf("arity %d, output %q; want 1, %q", b.arity, out.String(), "X")
-	}
-}
-
 // TestCallLiteralAllocs checks that a literal argument costs no allocation,
 // when the call runs: it allocates as much as the same call with stash keys,
 // whose values are already in the stash.
@@ -382,5 +368,31 @@ func TestCallLiteralAllocs(t *testing.T) {
 	}
 	if lit, key := allocs("lit"), allocs("key"); lit != key {
 		t.Fatalf("a call with literals allocates %v times, with stash keys %v times", lit, key)
+	}
+}
+
+// TestChoiceAllocs checks that a call of If, IfElse or Unless allocates only
+// the slice of its arguments: it chooses and writes, without a closure.
+func TestChoiceAllocs(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"plain.htm":  "<p>x</p>",
+		"if.htm":     "<p>${If(u, `a`)}</p>",
+		"ifelse.htm": "<p>${IfElse(u, `a`, `b`)}</p>",
+		"unless.htm": "<p>${Unless(n, `a`)}</p>",
+	})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"u": true, "n": false}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
+	}
+	plain := allocs("plain")
+	for _, path := range []string{"if", "ifelse", "unless"} {
+		if got := allocs(path) - plain; got != 1 {
+			t.Errorf("%s allocates %v times more than a page without calls, want 1", path, got)
+		}
 	}
 }

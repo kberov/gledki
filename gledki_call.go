@@ -64,12 +64,39 @@ var builtins map[string]*builtin
 
 func init() {
 	builtins = map[string]*builtin{
-		"If":     fn2(If),
-		"IfElse": fn3(IfElse),
-		"Unless": fn2(Unless),
+		"If":     {arity: 2, run: runIf},
+		"IfElse": {arity: 3, run: runIfElse},
+		"Unless": {arity: 2, run: runUnless},
 		"Exec":   {arity: 1, run: runExec},
 		"Set":    StashFunc2(set).b,
 	}
+}
+
+// runIf is the builtin If: it works like [If], but writes the chosen argument
+// at once, so no [TagFunc] is made for it (an allocation less for every call).
+// The condition must be a bool. The same is true for [runIfElse] and
+// [runUnless].
+func runIf(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	if !arg[bool](c, args, 0) {
+		return 0, nil
+	}
+	return writeValue(w, c.text, args[1])
+}
+
+// runIfElse is the builtin IfElse: it works like [IfElse]. See [runIf].
+func runIfElse(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	if arg[bool](c, args, 0) {
+		return writeValue(w, c.text, args[1])
+	}
+	return writeValue(w, c.text, args[2])
+}
+
+// runUnless is the builtin Unless: it works like [Unless]. See [runIf].
+func runUnless(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	if arg[bool](c, args, 0) {
+		return 0, nil
+	}
+	return writeValue(w, c.text, args[1])
 }
 
 // set is the builtin Set: ${Set(`key`, value)} writes `v` under `key` in the
@@ -132,31 +159,6 @@ func arg[T any](c *call, args []any, i int) T {
 		panic(fmt.Sprintf("%s: argument %d (%s) is %T, not %T", c.text, i+1, c.args[i].text, args[i], v))
 	}
 	return v
-}
-
-// fn1 makes a builtin from the Go function `f` with one parameter. The
-// result of `f` is written like a stash value (nil, string, []byte or
-// [TagFunc]).
-func fn1[A, R any](f func(A) R) *builtin {
-	return &builtin{arity: 1, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return writeValue(w, c.text, f(arg[A](c, args, 0)))
-	}}
-}
-
-// fn2 makes a builtin from the Go function `f` with two parameters, like
-// [fn1].
-func fn2[A, B, R any](f func(A, B) R) *builtin {
-	return &builtin{arity: 2, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return writeValue(w, c.text, f(arg[A](c, args, 0), arg[B](c, args, 1)))
-	}}
-}
-
-// fn3 makes a builtin from the Go function `f` with three parameters, like
-// [fn1].
-func fn3[A, B, C, R any](f func(A, B, C) R) *builtin {
-	return &builtin{arity: 3, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return writeValue(w, c.text, f(arg[A](c, args, 0), arg[B](c, args, 1), arg[C](c, args, 2)))
-	}}
 }
 
 // errUnknownFunc is wrapped by the error of [parseCall] for a call of a
