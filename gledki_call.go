@@ -148,6 +148,9 @@ var errUnknownFunc = errors.New("unknown function")
 //     expression, which is not a call, but contains one (see [builtinInside]);
 //   - the ready call otherwise.
 func parseCall(content string) (*call, error) {
+	if !builtinsRead.Load() {
+		builtinsRead.Store(true)
+	}
 	expr, err := parser.ParseExpr(content)
 	if err != nil {
 		if startsWithBuiltin(content) {

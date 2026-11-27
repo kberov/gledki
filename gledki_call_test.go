@@ -198,8 +198,13 @@ var callCases = []callCase{
 var writeTag TagFunc = func(w io.Writer, tag string) (int, error) { return io.WriteString(w, tag) }
 
 // TestCalls checks the calls of builtins, executed by [Gledki.Exec].
-func TestCalls(t *testing.T) {
-	for _, c := range callCases {
+func TestCalls(t *testing.T) { runCallCases(t, callCases) }
+
+// runCallCases executes the main template `page` of every case with its stash
+// and checks the output or the panic.
+func runCallCases(t *testing.T, cases []callCase) {
+	t.Helper()
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeFiles(t, root, c.files)

@@ -1,0 +1,131 @@
+package gledki
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/labstack/gommon/log"
+)
+
+// TestMain registers the functions of the tests after every init() of the
+// package and before any test compiles a template.
+func TestMain(m *testing.M) {
+	registerTestFuncs()
+	os.Exit(m.Run())
+}
+
+func registerTestFuncs() {
+	Func("Pick", StashFunc2(pick))
+	Func("Hello", StashFunc0(hello))
+	Func("Upper", StashFunc1(upper))
+	Func("Mark", StashFunc1(mark))
+}
+
+// pick returns "selected", when the value of `key` in the stash is `want`.
+func pick(s Stash, key, want string) string {
+	if fmt.Sprint(s[key]) == want {
+		return "selected"
+	}
+	return ""
+}
+
+func hello(s Stash) string { return "Hello, " + fmt.Sprint(s["name"]) }
+
+func upper(_ Stash, v string) []byte { return []byte(strings.ToUpper(v)) }
+
+// mark writes true under `key` in the stash and returns [writeTag].
+func mark(s Stash, key string) TagFunc {
+	s[key] = true
+	return writeTag
+}
+
+// funcCases are the cases of [TestFuncCalls].
+var funcCases = []callCase{
+	{name: "pick selected", files: page("<option ${Pick(`t`, `1`)}>"),
+		stash: Stash{"t": "1"}, want: "<option selected>"},
+	{name: "pick not selected", files: page("<option ${Pick(`t`, `1`)}>"),
+		stash: Stash{"t": "2"}, want: "<option >"},
+	{name: "pick missing key", files: page("[${Pick(`t`, `1`)}]"),
+		stash: Stash{}, want: "[]"},
+	{name: "no arguments", files: page("${Hello()}"),
+		stash: Stash{"name": "Ana"}, want: "Hello, Ana"},
+	{name: "bytes result", files: page("${Upper(`ab`)}"), stash: Stash{}, want: "AB"},
+	{name: "stash key argument", files: page("${Upper(v)}"), stash: Stash{"v": "x"}, want: "X"},
+	{name: "tagfunc result and write", files: page("${Mark(`seen`)}${If(seen, `!`)}"),
+		stash: Stash{}, want: "Mark(`seen`)!"},
+	{name: "inside If", files: page("[${If(u, Pick(`t`, `1`))}]"),
+		stash: Stash{"u": true, "t": "1"}, want: "[selected]"},
+	{name: "wrong argument type", files: page("${Upper(v)}"),
+		stash: Stash{"v": 5}, panics: "template \"page\": Upper(v): argument 1 (v) is int, not string"},
+}
+
+// TestFuncCalls checks the calls of the functions of the user, registered
+// with [Func].
+func TestFuncCalls(t *testing.T) { runCallCases(t, funcCases) }
+
+// TestFuncCompileErrors checks that a wrong call of a function of the user is
+// a compile error with the template file and the line.
+func TestFuncCompileErrors(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, page("${Pick(`t`)}"))
+	_, err := newIn(t, root, tagsPair).Compile("page")
+	const want = "page.htm, line 1: Pick takes 2 arguments, got 1"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("the error must contain %q, got %v", want, err)
+	}
+}
+
+// funcPanicCase is one case of [TestFuncPanics]: the name and the function
+// given to [Func] and a part of the expected panic.
+type funcPanicCase struct {
+	name   string
+	fn     Function
+	panics string
+}
+
+// funcPanicCases are the cases of [TestFuncPanics].
+var funcPanicCases = []funcPanicCase{
+	{name: "Nothing", fn: Function{}, panics: `gledki.Func("Nothing"): no function`},
+	{name: "a b", fn: StashFunc0(hello), panics: `gledki.Func("a b"): not a Go identifier`},
+	{name: "If", fn: StashFunc0(hello), panics: `gledki.Func("If"): already registered`},
+	{name: "Pick", fn: StashFunc0(hello), panics: `gledki.Func("Pick"): already registered`},
+}
+
+// TestFuncPanics checks that [Func] refuses a wrong registration.
+func TestFuncPanics(t *testing.T) {
+	for _, c := range funcPanicCases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := panicMessage(func() { Func(c.name, c.fn) })
+			if !strings.Contains(msg, c.panics) {
+				t.Fatalf("the panic must contain %q, got %q", c.panics, msg)
+			}
+		})
+	}
+}
+
+// TestFuncAfterCompile checks that [Func] panics after the first compile and
+// does not register the function.
+func TestFuncAfterCompile(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{"page.htm": "${If(u, `x`)}", "late.htm": "${Late()}"})
+	tpls := newIn(t, root, tagsPair)
+	if _, err := tpls.Compile("page"); err != nil {
+		t.Fatal(err)
+	}
+	const want = "templates are already compiled; register functions in init()"
+	if msg := panicMessage(func() { Func("Late", StashFunc0(hello)) }); !strings.Contains(msg, want) {
+		t.Fatalf("the panic must contain %q, got %q", want, msg)
+	}
+	var logged strings.Builder
+	tpls.Logger = log.New("test")
+	tpls.Logger.SetOutput(&logged)
+	tpls.Logger.SetLevel(log.WARN)
+	if _, err := tpls.Compile("late"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logged.String(), "unknown function Late") {
+		t.Fatalf("Late must not be registered; the warning is %q", logged.String())
+	}
+}
