@@ -107,6 +107,7 @@ var funcPanicCases = []funcPanicCase{
 	{name: "If", fn: StashFunc0(hello), panics: `gledki.Func("If"): already registered`},
 	{name: "Pick", fn: StashFunc0(hello), panics: `gledki.Func("Pick"): already registered`},
 	{name: "Set", fn: StashFunc0(hello), panics: `gledki.Func("Set"): already registered`},
+	{name: "Unless", fn: StashFunc0(hello), panics: `gledki.Func("Unless"): already registered`},
 }
 
 // TestFuncPanics checks that [Func] refuses a wrong registration.

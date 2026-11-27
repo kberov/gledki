@@ -22,7 +22,7 @@ var builtinsRead atomic.Bool
 // ${Selected(`currency`, `EUR`)}. Register the functions in init() (or in
 // main before the first compile): Func panics, when any template was already
 // compiled, when `name` is not a Go identifier or is already registered (also
-// the builtins If, IfElse, Exec and Set), and when `fn` is the zero
+// the builtins If, IfElse, Unless, Exec and Set), and when `fn` is the zero
 // [Function].
 //
 // The function gets the stash of the current execution as its first

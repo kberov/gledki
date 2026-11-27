@@ -61,12 +61,13 @@ values, which the program puts in the stash, but it cannot reach anything else
 in the program, except the functions, which the program registers for templates
 (see Functions of the user).
 
-The builtins are [If], [IfElse], Exec (it executes another template file with
-the same stash, like [Gledki.Exec]) and Set (${Set(`key`, value)} writes the
-value under key in the stash and writes nothing). The condition of If and
-IfElse must be a bool in the stash; anything else (also a missing key) panics,
-and the panic names the template (with the chain of Exec calls), the call and
-the argument. An argument is one of:
+The builtins are [If], [IfElse], [Unless] (the opposite of If, since a
+condition cannot be negated in a template), Exec (it executes another template
+file with the same stash, like [Gledki.Exec]) and Set (${Set(`key`, value)}
+writes the value under key in the stash and writes nothing). The condition of
+If, IfElse and Unless must be a bool in the stash; anything else (also a
+missing key) panics, and the panic names the template (with the chain of Exec
+calls), the call and the argument. An argument is one of:
 
   - a stash key (`IsUserSignedIn`): its value from the stash;
   - a string literal in backticks or double quotes (`partials/form`);

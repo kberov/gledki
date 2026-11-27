@@ -22,6 +22,9 @@ var ifCases = []ifCase{
 	{"if true nil", If(true, nil), ""},
 	{"ifelse true", IfElse(true, "a", "e"), "a"},
 	{"ifelse false empty", IfElse(false, "a", ""), ""},
+	{"unless false", Unless(false, "x"), "x"},
+	{"unless true", Unless(true, "x"), ""},
+	{"unless false nil", Unless(false, nil), ""},
 }
 
 // TestIf checks what the TagFuncs, returned by [If] and [IfElse], write.

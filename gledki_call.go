@@ -56,6 +56,7 @@ func init() {
 	builtins = map[string]*builtin{
 		"If":     fn2(If),
 		"IfElse": fn3(IfElse),
+		"Unless": fn2(Unless),
 		"Exec":   {arity: 1, run: runExec},
 		"Set":    StashFunc2(set).b,
 	}
@@ -268,8 +269,13 @@ func callArgument(content string, ce *ast.CallExpr) (argument, error) {
 }
 
 // notAllowed returns the error for an expression, which is not allowed in a
-// call.
+// call. For a negation (!a) it tells what to write instead.
 func notAllowed(content string, n ast.Node) error {
+	if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.NOT {
+		x := source(content, u.X)
+		return fmt.Errorf("%s is not allowed in a call; write Unless(%s, …) instead of If(!%s, …), IfElse(%s, y, x) instead of IfElse(!%s, x, y)",
+			source(content, n), x, x, x, x)
+	}
 	return fmt.Errorf("%s is not allowed in a call; only stash keys, string literals and calls are",
 		source(content, n))
 }

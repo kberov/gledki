@@ -52,7 +52,9 @@ var parseCallCases = []parseCallCase{
 	{"lang(en)", "", "unknown"},
 	{"fmt.Sprintf(x)", "", "unknown"},
 	{"If(a)", "", "If takes 2 arguments, got 1"},
-	{"If(!a, b)", "", "!a is not allowed in a call"},
+	{"If(!a, b)", "", "!a is not allowed in a call; write Unless(a, …) instead of If(!a, …)"},
+	{"IfElse(!a, b, c)", "", "!a is not allowed in a call; write Unless(a, …) instead of If(!a, …)"},
+	{"If(-a, b)", "", "-a is not allowed in a call; only stash keys"},
 	{"If(a, 1)", "", "only string literals are allowed, got 1"},
 	{"If(a, inv.Total)", "", "dot notation is not supported yet: inv.Total"},
 	{"IfElse(a, `", "", "cannot parse"},
@@ -192,6 +194,14 @@ var callCases = []callCase{
 	},
 	{name: "tagfunc gets its key", files: page("[${If(u, f)}|${IfElse(u, g, `b`)}]"),
 		stash: Stash{"u": true, "f": writeTag, "g": writeTag}, want: "[f|g]"},
+	{name: "unless false", files: page("[${Unless(u, name)}]"),
+		stash: Stash{"u": false, "name": "N"}, want: "[N]"},
+	{name: "unless true", files: page("[${Unless(u, name)}]"),
+		stash: Stash{"u": true, "name": "N"}, want: "[]"},
+	{name: "unless exec skipped", files: page("[${Unless(u, Exec(`missing`))}]"),
+		stash: Stash{"u": true}, want: "[]"},
+	{name: "unless missing condition", files: page("${Unless(u, `x`)}"),
+		stash: Stash{}, panics: "template \"page\": Unless(u, `x`): argument 1 (u) is <nil>, not bool"},
 }
 
 // writeTag is a [TagFunc], which writes the tag it is called with.
