@@ -57,7 +57,18 @@ type execution struct {
 	// they were written, because a nested call can be kept with Set and run
 	// later, from inside another template.
 	depth int
+	// args is the slice, which the calls of the execution take the values of
+	// their arguments from; only the args of top are used. It works as a
+	// stack: a call appends its values, runs and cuts them off again, so a
+	// nested call, which runs meanwhile, takes the places after them. So the
+	// calls of one execution allocate for their arguments only when args
+	// grows.
+	args []any
 }
+
+// argsCap is the first capacity of [execution.args]: enough for a call with
+// three arguments and two levels of nested calls, so it rarely grows.
+const argsCap = 8
 
 // builtins are the functions, which can be called from a template, by name.
 var builtins map[string]*builtin
@@ -115,19 +126,40 @@ func set(s Stash, key string, v any) TagFunc {
 // (nil, when the stash has no such key), a literal its text (ready in
 // [argument.value]), and a nested
 // call a [TagFunc], which runs the nested call only when it is written.
+//
+// The values are put on [execution.args] of the top execution and are cut
+// off, when the call returns. When it panics, they stay there, but then the
+// execution does not go on: [runIn] panics again.
 func (c *call) run(e *execution, w io.Writer) (int, error) {
-	args := make([]any, len(c.args))
-	for i, a := range c.args {
+	if len(c.args) == 0 {
+		return c.fn.run(e, w, c, nil)
+	}
+	top := e.top
+	if top.args == nil {
+		top.args = make([]any, 0, argsCap)
+	}
+	start := len(top.args)
+	for _, a := range c.args {
+		var v any
 		switch a.kind {
 		case argKey:
-			args[i] = keyValue(e.stash, a.text)
+			v = keyValue(e.stash, a.text)
 		case argLiteral:
-			args[i] = a.value
+			v = a.value
 		case argCall:
-			args[i] = a.call.tagFunc(e)
+			v = a.call.tagFunc(e)
 		}
+		top.args = append(top.args, v)
 	}
-	return c.fn.run(e, w, c, args)
+	end := len(top.args)
+	// The capacity is cut, so the function cannot append over the places of
+	// the nested calls.
+	n, err := c.fn.run(e, w, c, top.args[start:end:end])
+	// Nested calls have cut their values off already, so top.args has the
+	// length end again (maybe in a new, larger array).
+	clear(top.args[start:end])
+	top.args = top.args[:start]
+	return n, err
 }
 
 // keyValue returns the value of `key` in `stash`. A [TagFunc] is wrapped, so

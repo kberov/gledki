@@ -88,6 +88,8 @@ var funcCases = []callCase{
 		stash: Stash{}, want: "[PP]"},
 	{name: "set key missing", files: page("${Set(k, `T`)}"),
 		stash: Stash{}, panics: "argument 1 (k) is <nil>, not string"},
+	{name: "set nested with args", files: page("${Set(`x`, IfElse(u, Pick(`t`, `1`), `no`))}[${x}|${Pick(`t`, `2`)}|${x}]"),
+		stash: Stash{"u": true, "t": "1"}, want: "[selected||selected]"},
 	{name: "set key not string", files: page("${Set(k, `T`)}"),
 		stash: Stash{"k": 5}, panics: "argument 1 (k) is int, not string"},
 }
@@ -244,7 +246,8 @@ func TestPanicErrorKept(t *testing.T) {
 }
 
 // TestFuncAllocs checks that a call of a function of the user, which returns
-// a string, allocates only the slice of its arguments, as a call of If does.
+// a string, allocates only the slice for the arguments of the execution (once
+// for all its calls, see [execution.args]), as a call of If does.
 func TestFuncAllocs(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
@@ -266,7 +269,7 @@ func TestFuncAllocs(t *testing.T) {
 		path string
 		want float64
 	}{
-		{"pick", 1},  // the slice of the arguments
+		{"pick", 1},  // the slice for the arguments
 		{"upper", 3}, // the slice, and the string and the []byte of upper
 		{"hello", 2}, // the two strings of hello (no arguments: no slice)
 	} {

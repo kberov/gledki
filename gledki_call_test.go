@@ -194,6 +194,18 @@ var callCases = []callCase{
 	},
 	{name: "tagfunc gets its key", files: page("[${If(u, f)}|${IfElse(u, g, `b`)}]"),
 		stash: Stash{"u": true, "f": writeTag, "g": writeTag}, want: "[f|g]"},
+	{name: "nested args kept", files: page("[${IfElse(u, IfElse(n, `a`, `b`), `c`)}]"),
+		stash: Stash{"u": true, "n": false}, want: "[b]"},
+	{name: "args after nested", files: page("[${IfElse(u, If(u, `a`), `c`)}|${IfElse(n, `x`, `y`)}]"),
+		stash: Stash{"u": true, "n": false}, want: "[a|y]"},
+	{name: "deep nesting", files: page(
+		"${IfElse(u, IfElse(u, IfElse(u, IfElse(u, IfElse(u, IfElse(u, `deep`, `1`), `2`), `3`), `4`), `5`), `6`)}" +
+			"${IfElse(n, `x`, `y`)}"),
+		stash: Stash{"u": true, "n": false}, want: "deepy"},
+	{name: "exec between args", files: map[string]string{
+		"page.htm": "[${IfElse(u, Exec(`p`), `c`)}|${IfElse(n, `x`, `y`)}]",
+		"p.htm":    "${IfElse(u, `p1`, `p2`)}${Unless(n, `+`)}"},
+		stash: Stash{"u": true, "n": false}, want: "[p1+|y]"},
 	{name: "unless false", files: page("[${Unless(u, name)}]"),
 		stash: Stash{"u": false, "name": "N"}, want: "[N]"},
 	{name: "unless true", files: page("[${Unless(u, name)}]"),
@@ -372,7 +384,8 @@ func TestCallLiteralAllocs(t *testing.T) {
 }
 
 // TestChoiceAllocs checks that a call of If, IfElse or Unless allocates only
-// the slice of its arguments: it chooses and writes, without a closure.
+// the slice for the arguments of the execution (see [execution.args]): it
+// chooses and writes, without a closure.
 func TestChoiceAllocs(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
@@ -394,5 +407,27 @@ func TestChoiceAllocs(t *testing.T) {
 		if got := allocs(path) - plain; got != 1 {
 			t.Errorf("%s allocates %v times more than a page without calls, want 1", path, got)
 		}
+	}
+}
+
+// TestCallArgsReused checks that the calls of one execution reuse one slice
+// for their arguments: a page with twenty calls allocates as much as a page
+// with one.
+func TestCallArgsReused(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"one.htm":    "${IfElse(u, `a`, `b`)}",
+		"twenty.htm": strings.Repeat("${IfElse(u, `a`, `b`)}", 20),
+	})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"u": true}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
+	}
+	if one, twenty := allocs("one"), allocs("twenty"); one != twenty {
+		t.Fatalf("one call allocates %v times, twenty calls %v times", one, twenty)
 	}
 }
