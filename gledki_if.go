@@ -20,10 +20,20 @@ func IfElse(cond bool, then, els any) TagFunc {
 // happens to be true. The argument stmt is expected to be a []byte, string or
 // [TagFunc].
 func If(cond bool, stmt any) TagFunc {
-	if !cond {
-		return noop
+	if cond {
+		return value(stmt)
 	}
-	return value(stmt)
+	return noop
+}
+
+// Unless is the opposite of [If]: it writes stmt only if cond is false. A
+// template cannot negate a condition (${If(!signedIn, `x`)} is a compile
+// error), so it writes ${Unless(signedIn, `x`)} instead.
+func Unless(cond bool, stmt any) TagFunc {
+	if !cond {
+		return value(stmt)
+	}
+	return noop
 }
 
 // noop is a [TagFunc] which writes nothing. It is shared, so returning it

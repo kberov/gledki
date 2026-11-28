@@ -47,35 +47,43 @@ The documentation uses these words for the different forms of a template:
 
 # Calls
 
-A template can call a few Go functions (builtins) with values from the
-[Stash], so that fewer values have to be prepared in Go:
+Since v0.7.11 a template can call a few Go functions (builtins) with values
+from the [Stash], so that fewer values have to be assigned as stash values in
+Go:
 
 	<img src="${IfElse(weHaveAUser, `/img/user.svg`, `/img/users-plus.svg`)}">
 	${If(showForm, Exec(`partials/form`))}
 
-A template sees only the stash: a name in it is a stash key, never a
-variable, function or package of the Go program. It can call only the
-builtins below; a call of any other function stays a placeholder. So a
-template can use the values, which the program puts in the stash, but it
-cannot reach anything else in the program.
+A template sees only the stash: a name in it is a stash key, never a variable,
+function or package of the Go program. It can call only the builtins below; a
+call of any other function stays a placeholder. So a template can use the
+values, which the program puts in the stash, but it cannot reach anything else
+in the program, except the functions, which the program registers for templates
+(see Functions of the user).
 
-The builtins are [If], [IfElse] and Exec (it executes another template file
-with the same stash, like [Gledki.Exec]). The condition of If and IfElse must
-be a bool in the stash; anything else (also a missing key) panics, and the
-panic names the call and the argument. An argument is one of:
+The builtins are [If], [IfElse], [Unless] (the opposite of If, since a
+condition cannot be negated in a template), Exec (it executes another template
+file with the same stash, like [Gledki.Exec]) and Set (${Set(`key`, value)}
+writes the value under key in the stash and writes nothing). The condition of
+If, IfElse and Unless must be a bool in the stash; anything else (also a
+missing key) panics, and the panic names the template (with the chain of Exec
+calls), the call and the argument. An argument is one of:
 
-  - a stash key (`weHaveAUser`): its value from the stash;
+  - a stash key (`IsUserSignedIn`): its value from the stash;
   - a string literal in backticks or double quotes (`partials/form`);
-  - a nested call (`Exec(`partials/form`)`): it runs only when its result is
-    written, so above the form is executed only when showForm is true.
+  - a nested call (`Exec(`partials/form`)`): it does not run before the
+    outer call. The outer function returns a [TagFunc] (a
+    closure), which runs the nested call when it is called. In the example
+    above If gets such a TagFunc from Exec(`partials/form`) and calls it only
+    when showForm is true, so only then is the form executed.
 
 Nothing else is allowed: no operators, no numbers, no dot notation yet. The
 logic stays in Go; the template only calls. The tag content is parsed with
 [go/parser.ParseExpr] once, when the template is compiled; a wrong call of a
 builtin is a compile error with the template file and the line, and a call of
 an unknown function stays a placeholder and is logged as a warning. When the
-template is executed, the stash wins: if it has a key equal to the tag
-content, its value is written, and the call does not run.
+template is executed, the stash wins: if it has a key equal to the tag content,
+its value is written, and the call does not run.
 
 Only [Gledki.Exec] (and [Gledki.Execute]) run calls; [Gledki.FtExec] and its
 siblings execute the compiled text with fasttemplate and know nothing about
@@ -83,6 +91,53 @@ them. An end tag inside a literal (`${IfElse(a, `}`, `x`)}`) ends the tag, so
 such a call is a compile error. Nested Exec calls are limited by
 [Gledki.IncludeLimit]; a [TagFunc] in the stash, which calls [Gledki.Exec]
 itself, starts the count again.
+
+# How a call runs
+
+When the execution reaches a call tag, three things happen. First the arguments
+get their values: a stash key its value, a literal its text and a nested call a
+TagFunc, which runs that call. Then the function is called with these values.
+Last, its result is written at the place of the tag, as a stash value is (nil,
+string, []byte or TagFunc): a TagFunc is called with the writer. If, IfElse and
+Unless choose one of their arguments and write it there, so a nested call,
+which is not chosen, is never run. So the calls are higher-order functions:
+they take functions, and nothing is executed until a TagFunc is called with
+the writer. (The Go functions [If], [IfElse] and [Unless], used in a stash,
+return a TagFunc, which writes the chosen argument; in a template the choice
+is written at once, without making it.) A function of the user gets a nested call as a TagFunc
+too, so its parameter for it must be any or TagFunc. Set keeps such a TagFunc
+as it is, not what it writes: after ${Set(`x`, Exec(`p`))} every ${x} executes
+the file `p` again, and after ${Set(`x`, If(u, `a`))} every ${x} reads u again.
+
+# Functions of the user
+
+The program can register its own functions for the templates with [Func], made
+ready by one of the adapters [StashFunc0], [StashFunc1] and [StashFunc2] (the
+number is the count of arguments in the template). Register them in init(),
+before any template is compiled:
+
+	func init() {
+		gledki.Func("Selected", gledki.StashFunc2(selected))
+	}
+
+	// selected returns "selected", when the value of `key` in the stash is `want`.
+	func selected(s gledki.Stash, key, want string) string {
+		if fmt.Sprint(s[key]) == want {
+			return "selected"
+		}
+		return ""
+	}
+
+and call them like the builtins:
+
+	<option ${Selected(`currency`, `BGN`)}>BGN</option>
+
+The stash of the current execution is passed first, and the function may also
+write to it: a written value is seen by the tags after the call and by the
+templates executed with Exec after it. A written key, equal to the content of a
+later call tag, wins over that call, as any stash key does. So, as with Set, a
+stash must not be shared by executions, which run at the same time (see
+[Gledki.Exec]).
 */
 package gledki
 
@@ -334,6 +389,9 @@ func (t *Gledki) MustCompile(path string) string {
 // [Gledki.Compile] returns only the compiled text; [Gledki.Execute] executes
 // the parsed template.
 func (t *Gledki) compile(path string) (compiledT *compiledTemplate, err error) {
+	if !builtinsRead.Load() {
+		builtinsRead.Store(true)
+	}
 	path = t.toFullPath(path)
 	if CacheTemplates {
 		if compiledT, err = t.loadCompiled(path); err == nil {

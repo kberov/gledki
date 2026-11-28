@@ -52,7 +52,9 @@ var parseCallCases = []parseCallCase{
 	{"lang(en)", "", "unknown"},
 	{"fmt.Sprintf(x)", "", "unknown"},
 	{"If(a)", "", "If takes 2 arguments, got 1"},
-	{"If(!a, b)", "", "!a is not allowed in a call"},
+	{"If(!a, b)", "", "!a is not allowed in a call; write Unless(a, …) instead of If(!a, …)"},
+	{"IfElse(!a, b, c)", "", "!a is not allowed in a call; write Unless(a, …) instead of If(!a, …)"},
+	{"If(-a, b)", "", "-a is not allowed in a call; only stash keys"},
 	{"If(a, 1)", "", "only string literals are allowed, got 1"},
 	{"If(a, inv.Total)", "", "dot notation is not supported yet: inv.Total"},
 	{"IfElse(a, `", "", "cannot parse"},
@@ -183,19 +185,48 @@ var callCases = []callCase{
 		stash: Stash{"form": 5}, panics: "Exec(form): argument 1 (form) is int, not string"},
 	{name: "exec cycle", files: page("${Exec(`page`)}"),
 		stash: Stash{}, panics: "nested Exec calls reached while trying to execute page"},
+	{name: "panic names the template", files: page("${If(u, `x`)}"),
+		stash: Stash{}, panics: "template \"page\": If(u, `x`): argument 1 (u) is <nil>, not bool"},
+	{name: "panic names the Exec chain", files: map[string]string{"page.htm": "${Exec(`p`)}", "p.htm": "${If(u, `x`)}"},
+		stash: Stash{}, panics: "template \"page\": template \"p\": If(u, `x`): argument 1 (u)"},
 	{name: "call before unclosed tag", files: page("[${If(u, `x`)}] ${"),
 		stash: Stash{"u": true}, want: "[x] ${",
 	},
 	{name: "tagfunc gets its key", files: page("[${If(u, f)}|${IfElse(u, g, `b`)}]"),
 		stash: Stash{"u": true, "f": writeTag, "g": writeTag}, want: "[f|g]"},
+	{name: "nested args kept", files: page("[${IfElse(u, IfElse(n, `a`, `b`), `c`)}]"),
+		stash: Stash{"u": true, "n": false}, want: "[b]"},
+	{name: "args after nested", files: page("[${IfElse(u, If(u, `a`), `c`)}|${IfElse(n, `x`, `y`)}]"),
+		stash: Stash{"u": true, "n": false}, want: "[a|y]"},
+	{name: "deep nesting", files: page(
+		"${IfElse(u, IfElse(u, IfElse(u, IfElse(u, IfElse(u, IfElse(u, `deep`, `1`), `2`), `3`), `4`), `5`), `6`)}" +
+			"${IfElse(n, `x`, `y`)}"),
+		stash: Stash{"u": true, "n": false}, want: "deepy"},
+	{name: "exec between args", files: map[string]string{
+		"page.htm": "[${IfElse(u, Exec(`p`), `c`)}|${IfElse(n, `x`, `y`)}]",
+		"p.htm":    "${IfElse(u, `p1`, `p2`)}${Unless(n, `+`)}"},
+		stash: Stash{"u": true, "n": false}, want: "[p1+|y]"},
+	{name: "unless false", files: page("[${Unless(u, name)}]"),
+		stash: Stash{"u": false, "name": "N"}, want: "[N]"},
+	{name: "unless true", files: page("[${Unless(u, name)}]"),
+		stash: Stash{"u": true, "name": "N"}, want: "[]"},
+	{name: "unless exec skipped", files: page("[${Unless(u, Exec(`missing`))}]"),
+		stash: Stash{"u": true}, want: "[]"},
+	{name: "unless missing condition", files: page("${Unless(u, `x`)}"),
+		stash: Stash{}, panics: "template \"page\": Unless(u, `x`): argument 1 (u) is <nil>, not bool"},
 }
 
 // writeTag is a [TagFunc], which writes the tag it is called with.
 var writeTag TagFunc = func(w io.Writer, tag string) (int, error) { return io.WriteString(w, tag) }
 
 // TestCalls checks the calls of builtins, executed by [Gledki.Exec].
-func TestCalls(t *testing.T) {
-	for _, c := range callCases {
+func TestCalls(t *testing.T) { runCallCases(t, callCases) }
+
+// runCallCases executes the main template `page` of every case with its stash
+// and checks the output or the panic.
+func runCallCases(t *testing.T, cases []callCase) {
+	t.Helper()
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeFiles(t, root, c.files)
@@ -332,16 +363,71 @@ func TestArg(t *testing.T) {
 	}
 }
 
-// TestFn1 checks that [fn1] makes a builtin from a Go function with one typed
-// parameter and writes its result.
-func TestFn1(t *testing.T) {
-	b := fn1(strings.ToUpper)
-	c := &call{text: "U(a)", fn: b, args: []argument{{kind: argKey, text: "a"}}}
-	var out strings.Builder
-	if _, err := c.run(&execution{stash: Stash{"a": "x"}}, &out); err != nil {
-		t.Fatal(err)
+// TestCallLiteralAllocs checks that a literal argument costs no allocation,
+// when the call runs: it allocates as much as the same call with stash keys,
+// whose values are already in the stash.
+func TestCallLiteralAllocs(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"lit.htm": "${IfElse(u, `a`, `b`)}", "key.htm": "${IfElse(u, a, b)}"})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"u": true, "a": "a", "b": "b"}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
 	}
-	if b.arity != 1 || out.String() != "X" {
-		t.Fatalf("arity %d, output %q; want 1, %q", b.arity, out.String(), "X")
+	if lit, key := allocs("lit"), allocs("key"); lit != key {
+		t.Fatalf("a call with literals allocates %v times, with stash keys %v times", lit, key)
+	}
+}
+
+// TestChoiceAllocs checks that a call of If, IfElse or Unless allocates only
+// the slice for the arguments of the execution (see [execution.args]): it
+// chooses and writes, without a closure.
+func TestChoiceAllocs(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"plain.htm":  "<p>x</p>",
+		"if.htm":     "<p>${If(u, `a`)}</p>",
+		"ifelse.htm": "<p>${IfElse(u, `a`, `b`)}</p>",
+		"unless.htm": "<p>${Unless(n, `a`)}</p>",
+	})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"u": true, "n": false}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
+	}
+	plain := allocs("plain")
+	for _, path := range []string{"if", "ifelse", "unless"} {
+		if got := allocs(path) - plain; got != 1 {
+			t.Errorf("%s allocates %v times more than a page without calls, want 1", path, got)
+		}
+	}
+}
+
+// TestCallArgsReused checks that the calls of one execution reuse one slice
+// for their arguments: a page with twenty calls allocates as much as a page
+// with one.
+func TestCallArgsReused(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"one.htm":    "${IfElse(u, `a`, `b`)}",
+		"twenty.htm": strings.Repeat("${IfElse(u, `a`, `b`)}", 20),
+	})
+	tpls := newIn(t, root, tagsPair)
+	stash := Stash{"u": true}
+	allocs := func(path string) float64 {
+		if _, err := tpls.Exec(io.Discard, path, stash); err != nil {
+			t.Fatal(err)
+		}
+		return testing.AllocsPerRun(100, func() { _, _ = tpls.Exec(io.Discard, path, stash) })
+	}
+	if one, twenty := allocs("one"), allocs("twenty"); one != twenty {
+		t.Fatalf("one call allocates %v times, twenty calls %v times", one, twenty)
 	}
 }

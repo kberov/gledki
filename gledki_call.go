@@ -24,7 +24,10 @@ const (
 type argument struct {
 	kind argKind
 	text string
-	call *call
+	// value is the text of a literal, already put in an `any` when the
+	// template is compiled, so a call does not allocate for it every time.
+	value any
+	call  *call
 }
 
 // call is a ready call of a [builtin], parsed from a tag content, for
@@ -46,37 +49,117 @@ type builtin struct {
 type execution struct {
 	t     *Gledki
 	stash Stash
-	depth int // how many Exec calls deep
+	// top is the execution of the [Gledki.Exec] called by the program; it is
+	// the execution itself there and the same for all nested Exec calls.
+	top *execution
+	// depth is how many calls of the builtin Exec are running now; only the
+	// depth of top is used. It counts the calls, which really run, not where
+	// they were written, because a nested call can be kept with Set and run
+	// later, from inside another template.
+	depth int
+	// args is the slice, which the calls of the execution take the values of
+	// their arguments from; only the args of top are used. It works as a
+	// stack: a call appends its values, runs and cuts them off again, so a
+	// nested call, which runs meanwhile, takes the places after them. So the
+	// calls of one execution allocate for their arguments only when args
+	// grows.
+	args []any
 }
+
+// argsCap is the first capacity of [execution.args]: enough for a call with
+// three arguments and two levels of nested calls, so it rarely grows.
+const argsCap = 8
 
 // builtins are the functions, which can be called from a template, by name.
 var builtins map[string]*builtin
 
 func init() {
 	builtins = map[string]*builtin{
-		"If":     fn2(If),
-		"IfElse": fn3(IfElse),
+		"If":     {arity: 2, run: runIf},
+		"IfElse": {arity: 3, run: runIfElse},
+		"Unless": {arity: 2, run: runUnless},
 		"Exec":   {arity: 1, run: runExec},
+		"Set":    StashFunc2(set).b,
 	}
+}
+
+// runIf is the builtin If: it works like [If], but writes the chosen argument
+// at once, so no [TagFunc] is made for it (an allocation less for every call).
+// The condition must be a bool. The same is true for [runIfElse] and
+// [runUnless].
+func runIf(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	if !arg[bool](c, args, 0) {
+		return 0, nil
+	}
+	return writeValue(w, c.text, args[1])
+}
+
+// runIfElse is the builtin IfElse: it works like [IfElse]. See [runIf].
+func runIfElse(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	if arg[bool](c, args, 0) {
+		return writeValue(w, c.text, args[1])
+	}
+	return writeValue(w, c.text, args[2])
+}
+
+// runUnless is the builtin Unless: it works like [Unless]. See [runIf].
+func runUnless(_ *execution, w io.Writer, c *call, args []any) (int, error) {
+	if arg[bool](c, args, 0) {
+		return 0, nil
+	}
+	return writeValue(w, c.text, args[1])
+}
+
+// set is the builtin Set: ${Set(`key`, value)} writes `v` under `key` in the
+// stash `s` and writes nothing. The tags after it and the templates executed
+// with Exec after it see the value. It panics, when the stash is nil.
+func set(s Stash, key string, v any) TagFunc {
+	if s == nil {
+		panic(fmt.Sprintf("Set(%q): the stash is nil", key))
+	}
+	s[key] = v
+	return noop
 }
 
 // run runs the call `c` in the execution `e` and writes its output to `w`.
 // The arguments get their values first: a stash key the value from the stash
-// (nil, when the stash has no such key), a literal its text, and a nested
+// (nil, when the stash has no such key), a literal its text (ready in
+// [argument.value]), and a nested
 // call a [TagFunc], which runs the nested call only when it is written.
+//
+// The values are put on [execution.args] of the top execution and are cut
+// off, when the call returns. When it panics, they stay there, but then the
+// execution does not go on: [runIn] panics again.
 func (c *call) run(e *execution, w io.Writer) (int, error) {
-	args := make([]any, len(c.args))
-	for i, a := range c.args {
+	if len(c.args) == 0 {
+		return c.fn.run(e, w, c, nil)
+	}
+	top := e.top
+	if top.args == nil {
+		top.args = make([]any, 0, argsCap)
+	}
+	start := len(top.args)
+	for _, a := range c.args {
+		var v any
 		switch a.kind {
 		case argKey:
-			args[i] = keyValue(e.stash, a.text)
+			v = keyValue(e.stash, a.text)
 		case argLiteral:
-			args[i] = a.text
+			v = a.value
 		case argCall:
-			args[i] = a.call.tagFunc(e)
+			v = a.call.tagFunc(e)
 		}
+		top.args = append(top.args, v)
 	}
-	return c.fn.run(e, w, c, args)
+	end := len(top.args)
+	// The capacity is cut, so the function cannot append over the places of
+	// the nested calls.
+	n, err := c.fn.run(e, w, c, top.args[start:end:end])
+	// Nested calls have cut their values off already, so top.args has the
+	// length end again (maybe in a new, larger array).
+	clear(top.args[start:end])
+	top.args = top.args[:start]
+	return n, err
 }
 
 // keyValue returns the value of `key` in `stash`. A [TagFunc] is wrapped, so
@@ -108,31 +191,6 @@ func arg[T any](c *call, args []any, i int) T {
 		panic(fmt.Sprintf("%s: argument %d (%s) is %T, not %T", c.text, i+1, c.args[i].text, args[i], v))
 	}
 	return v
-}
-
-// fn1 makes a builtin from the Go function `f` with one parameter. The
-// result of `f` is written like a stash value (nil, string, []byte or
-// [TagFunc]).
-func fn1[A, R any](f func(A) R) *builtin {
-	return &builtin{arity: 1, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(arg[A](c, args, 0)))(w, c.text)
-	}}
-}
-
-// fn2 makes a builtin from the Go function `f` with two parameters, like
-// [fn1].
-func fn2[A, B, R any](f func(A, B) R) *builtin {
-	return &builtin{arity: 2, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(arg[A](c, args, 0), arg[B](c, args, 1)))(w, c.text)
-	}}
-}
-
-// fn3 makes a builtin from the Go function `f` with three parameters, like
-// [fn1].
-func fn3[A, B, C, R any](f func(A, B, C) R) *builtin {
-	return &builtin{arity: 3, run: func(_ *execution, w io.Writer, c *call, args []any) (int, error) {
-		return value(f(arg[A](c, args, 0), arg[B](c, args, 1), arg[C](c, args, 2)))(w, c.text)
-	}}
 }
 
 // errUnknownFunc is wrapped by the error of [parseCall] for a call of a
@@ -240,7 +298,7 @@ func literalArgument(content string, lit *ast.BasicLit) (argument, error) {
 	if err != nil {
 		return argument{}, fmt.Errorf("cannot unquote %s: %v", lit.Value, err)
 	}
-	return argument{kind: argLiteral, text: text}, nil
+	return argument{kind: argLiteral, text: text, value: text}, nil
 }
 
 // callArgument makes an argument from a nested call of a builtin.
@@ -253,8 +311,13 @@ func callArgument(content string, ce *ast.CallExpr) (argument, error) {
 }
 
 // notAllowed returns the error for an expression, which is not allowed in a
-// call.
+// call. For a negation (!a) it tells what to write instead.
 func notAllowed(content string, n ast.Node) error {
+	if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.NOT {
+		x := source(content, u.X)
+		return fmt.Errorf("%s is not allowed in a call; write Unless(%s, …) instead of If(!%s, …), IfElse(%s, <b>, <a>) instead of IfElse(!%s, <a>, <b>)",
+			source(content, n), x, x, x, x)
+	}
 	return fmt.Errorf("%s is not allowed in a call; only stash keys, string literals and calls are",
 		source(content, n))
 }
@@ -264,16 +327,20 @@ func source(content string, n ast.Node) string {
 	return content[n.Pos()-1 : n.End()-1]
 }
 
-// runExec runs [Gledki.Exec] called from a template: ${Exec(`path`)} or
+// runExec runs [Gledki.Exec] called from a template: ${Exec(`path/file`)} or
 // ${Exec(key)}. The template file is executed with the same stash, one Exec
-// call deeper. The path must be a string; nested Exec calls are limited by
-// [Gledki.IncludeLimit], so a cycle panics instead of never ending.
+// call deeper. The path must be a string; the running nested Exec calls are
+// limited by [Gledki.IncludeLimit], so a cycle panics instead of never ending,
+// also when it goes through a value kept with Set.
 func runExec(e *execution, w io.Writer, c *call, args []any) (int, error) {
 	path := arg[string](c, args, 0)
-	if e.depth+1 > e.t.IncludeLimit {
+	top := e.top
+	if top.depth+1 > e.t.IncludeLimit {
 		e.t.Logger.Panicf("Limit of %d nested Exec calls reached while trying to execute %s",
 			e.t.IncludeLimit, path)
 	}
-	n, err := e.t.exec(w, path, e.stash, e.depth+1)
+	top.depth++
+	defer func() { top.depth-- }()
+	n, err := e.t.exec(w, path, e.stash, top)
 	return int(n), err
 }
